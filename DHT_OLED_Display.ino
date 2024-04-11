@@ -1,8 +1,12 @@
+#include "Config.h"
+
 #include <DHT.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TimeLib.h>
 
 #define DHTPIN 4    
 #define DHTTYPE DHT22   
@@ -12,10 +16,6 @@ DHT dht(DHTPIN, DHTTYPE);
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino resetpin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-const char* ssid = "YourWiFiSSID";
-const char* password = "YourWiFiPassword";
-const char* url = "https://ua.sinoptik.ua/%D0%BF%D0%BE%D0%B3%D0%BE%D0%B4%D0%B0-%D1%85%D0%BC%D0%B5%D0%BB%D1%8C%D0%BD%D0%B8%D1%86%D1%8C%D0%BA%D0%B8%D0%B9";
 
 enum ScreenMode {
     OUTSIDE_WEATHER,
@@ -47,6 +47,9 @@ void setup() {
         Serial.print(".");
     }
     Serial.println("Connected");
+
+    
+    setTimeFromAPI(); 
 }
 
 void loop() {
@@ -64,12 +67,61 @@ void loop() {
     }
 }
 
-float getTemperatureFromWeb() {
+void setTimeFromAPI() {
+    HTTPClient http;
+
+    
+    http.begin(url1); 
+    int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+        
+        String payload = http.getString();
+
+        
+        DynamicJsonDocument doc(1024);
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (!error) {
+            
+            long unixTime = doc["unixtime"];
+            
+           
+            setTime(unixTime + 3 * 3600); 
+            Serial.println("Time set from API");
+        } else {
+            Serial.println("Failed to parse JSON");
+        }
+    } else {
+        Serial.println("Failed to get time from API");
+    }
+
+    http.end();
+}
+
+
+String getCurrentTime() {
+    int currentHour = hour();
+    int currentMinute = minute();
+    int currentSecond = second();
+
+    String currentTime = String("");
+    currentTime += currentHour < 10 ? "0" + String(currentHour) : String(currentHour);
+    currentTime += ":";
+    currentTime += currentMinute < 10 ? "0" + String(currentMinute) : String(currentMinute);
+    currentTime += ":";
+    currentTime += currentSecond < 10 ? "0" + String(currentSecond) : String(currentSecond);
+
+    return currentTime;
+}
+
+void getTemperatureFromWeb(float& temperatureWeb, int& precipitationProbability) {
     HTTPClient http;
     http.begin(url); 
     int httpCode = http.GET(); 
-    float temperatureWeb = -999.0; 
-    int precipitationProbability = -1; 
+    
+    temperatureWeb = -999.0; 
+    precipitationProbability = -1; 
     
     if (httpCode > 0) { 
         String payload = http.getString(); 
@@ -86,9 +138,15 @@ float getTemperatureFromWeb() {
     }
 
     http.end(); 
-    
+}
+
+void showOutsideWeather() {
+    float temperatureWeb;
+    int precipitationProbability;
+    getTemperatureFromWeb(temperatureWeb, precipitationProbability);
+
     display.clearDisplay();
-    display.setTextSize(1);
+    display.setTextSize(1, 2);
     display.setTextColor(WHITE);
     display.setCursor(0, 0);
     display.print("Outside Temp: ");
@@ -97,15 +155,16 @@ float getTemperatureFromWeb() {
     display.print("Precipitation: ");
     display.print(precipitationProbability);
     display.println(" %");
+    display.print("Time: ");
+    display.print(getCurrentTime());
     display.display();
 
     Serial.print("Outside Temp: ");
     Serial.print(temperatureWeb);
     Serial.print(" C, Precipitation: ");
     Serial.print(precipitationProbability);
-    Serial.println(" %");
-
-    return temperatureWeb;
+    Serial.print(" %, Time: ");
+    Serial.println(getCurrentTime());
 }
 
 void readDHTSensor(float& temperature, float& humidity) {
@@ -114,27 +173,28 @@ void readDHTSensor(float& temperature, float& humidity) {
     humidity = dht.readHumidity(); 
 }
 
-void showOutsideWeather() {
-    float temperatureWeb = getTemperatureFromWeb();
-}
-
 void showInsideTemperatureHumidity() {
     float temperatureDHT, humidityDHT;
     readDHTSensor(temperatureDHT, humidityDHT);
-    
+
     display.clearDisplay();
+    display.setTextSize(1, 2);
+    display.setTextColor(WHITE);
     display.setCursor(0, 0);
-    display.print("Inside Temp:");
+    display.print("Inside Temp: ");
     display.print(temperatureDHT);
     display.println(" C");
-    display.print("Humidity:");
+    display.print("Humidity: ");
     display.print(humidityDHT);
     display.println(" %");
+    display.print("Time: ");
+    display.print(getCurrentTime());
     display.display();
 
-    Serial.print("Inside Temp:");
+    Serial.print("Inside Temp: ");
     Serial.print(temperatureDHT);
-    Serial.print(" C, Humidity:");
+    Serial.print(" C, Humidity: ");
     Serial.print(humidityDHT);
-    Serial.println(" %");
+    Serial.print(" %, Time: ");
+    Serial.println(getCurrentTime());
 }
