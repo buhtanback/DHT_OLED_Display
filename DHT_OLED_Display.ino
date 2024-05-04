@@ -18,6 +18,8 @@ DHT dht(DHTPIN, DHTTYPE);
 U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, /* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);
 
 
+const char *url = "http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&appid=89b5c4878e84804573dae7a6c3628e94&units=metric";
+
 #define skeletor_width 64
 #define skeletor_height 64
 const static unsigned char skeletor_bits[4][512] PROGMEM = {
@@ -381,30 +383,30 @@ void getTemperatureFromWeb(float& temperatureWeb, int& precipitationProbability)
   http.begin(url);
   int httpCode = http.GET();
 
-  temperatureWeb = -999.0;
-  precipitationProbability = -1;
+  float tempTemperatureWeb = -999.0; 
+  int tempPrecipitationProbability = -1;  // Изменили тип на int
 
   if (httpCode > 0) {
     String payload = http.getString();
-
-    int startIndex = payload.indexOf("class=\"today-temp\">") + 20;
-    int endIndex = payload.indexOf("</span>", startIndex);
-    String temperatureStr = payload.substring(startIndex, endIndex);
-    temperatureWeb = temperatureStr.toFloat();
-
-    startIndex = payload.indexOf("class=\"gray\">") + 13;
-    endIndex = payload.indexOf("</span>", startIndex);
-    String precipitationStr = payload.substring(startIndex, endIndex);
-    precipitationProbability = precipitationStr.toInt();
+    DynamicJsonDocument doc(1024);
+    deserializeJson(doc, payload);
+    
+    tempTemperatureWeb = doc["main"]["temp"];
+    tempPrecipitationProbability = doc["rain"]["1h"]; 
   }
+
+  temperatureWeb = tempTemperatureWeb;
+  precipitationProbability = tempPrecipitationProbability;
 
   http.end();
 }
 
 void showOutsideWeather() {
-  float temperatureWeb;
-  int precipitationProbability;
+  float temperatureWeb; // Изменили тип переменной на float
+  int precipitationProbability; // Оставили тип переменной как int
+
   getTemperatureFromWeb(temperatureWeb, precipitationProbability);
+  temperatureWeb = round(temperatureWeb);
 
   String currentTime = getCurrentTime();
 
@@ -413,21 +415,21 @@ void showOutsideWeather() {
   u8g2.setFont(u8g2_font_cu12_t_cyrillic);
   u8g2.setCursor(0, 15);
   u8g2.print("Вулиця: ");
-  u8g2.print(temperatureWeb);
+  u8g2.print(temperatureWeb, 1); // Оставляем только одну десятичную часть
   u8g2.print(" C");
   u8g2.setCursor(0, 30);
   u8g2.print("Опади: ");
   u8g2.print(precipitationProbability);
-  u8g2.print(" %");
+  u8g2.print(" mm");
   u8g2.setCursor(0, 45);
   u8g2.print(currentTime);
   u8g2.sendBuffer();
 
-  Serial.print("Street: ");
-  Serial.print(temperatureWeb);
-  Serial.print(" C, Osadki: ");
+  Serial.print("Temperature: ");
+  Serial.print(temperatureWeb, 1); // Оставляем только одну десятичную часть
+  Serial.print(" C, Precipitation (last hour): ");
   Serial.print(precipitationProbability);
-  Serial.print(" %, Time:  ");
+  Serial.print(" mm, Time:  ");
   Serial.println(currentTime);
 }
 
