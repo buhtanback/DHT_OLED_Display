@@ -22,6 +22,7 @@ const char *url = "http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi
 
 #define skeletor_width 64
 #define skeletor_height 64
+
 const static unsigned char skeletor_bits[4][512] PROGMEM = {
   {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe0,
@@ -207,7 +208,6 @@ const static unsigned char skeletor_bits[4][512] PROGMEM = {
 
 
 
-
 enum ScreenMode {
   OUTSIDE_WEATHER,
   INSIDE_TEMPERATURE_HUMIDITY
@@ -296,28 +296,16 @@ void setup() {
 void loop() {
   float distance = measureDistance(); 
 
-  if (distance < 25) { 
+  if (distance <= 25 && distance > 10) { 
+    showInsideTemperatureHumidity(); 
+  } else if (distance <= 10) {
     animateTriangle(); 
     delay(500); 
-  }
-
-  readButton();
-
-  if (currentScreen == INSIDE_TEMPERATURE_HUMIDITY) {
-    showInsideTemperatureHumidity();
   } else {
     showOutsideWeather();
   }
 
   delay(100);
-}
-
-void readButton() {
-  if (digitalRead(BUTTON_PIN) == LOW) {
-
-    switchScreen();
-    delay(10);
-  }
 }
 
 void switchScreen() {
