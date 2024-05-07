@@ -18,7 +18,8 @@ DHT dht(DHTPIN, DHTTYPE);
 U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, /* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);
 
 
-const char *url = "http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&appid=89b5c4878e84804573dae7a6c3628e94&units=metric";
+const char *url = "http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&lang=ua&appid=89b5c4878e84804573dae7a6c3628e94&units=metric";
+
 
 #define skeletor_width 64
 #define skeletor_height 64
@@ -298,7 +299,7 @@ void loop() {
 
   if (distance <= 25 && distance > 10) { 
     showInsideTemperatureHumidity(); 
-  } else if (distance <= 10) {
+  } else if (distance <= 5) {
     animateTriangle(); 
     delay(500); 
   } else {
@@ -366,13 +367,13 @@ String getCurrentTime() {
   return currentTime;
 }
 
-void getTemperatureFromWeb(float& temperatureWeb, int& precipitationProbability) {
+void getTemperatureFromWeb(float& temperatureWeb, String& weatherDescription) {
   HTTPClient http;
   http.begin(url);
   int httpCode = http.GET();
 
-  float tempTemperatureWeb = -999.0; 
-  int tempPrecipitationProbability = -1;  // Изменили тип на int
+  float tempTemperatureWeb = -999.0;
+  String tempWeatherDescription;
 
   if (httpCode > 0) {
     String payload = http.getString();
@@ -380,20 +381,20 @@ void getTemperatureFromWeb(float& temperatureWeb, int& precipitationProbability)
     deserializeJson(doc, payload);
     
     tempTemperatureWeb = doc["main"]["temp"];
-    tempPrecipitationProbability = doc["rain"]["1h"]; 
+    tempWeatherDescription = doc["weather"][0]["description"].as<String>();  // Явное преобразование в String
   }
 
   temperatureWeb = tempTemperatureWeb;
-  precipitationProbability = tempPrecipitationProbability;
+  weatherDescription = tempWeatherDescription;
 
   http.end();
 }
 
 void showOutsideWeather() {
-  float temperatureWeb; // Изменили тип переменной на float
-  int precipitationProbability; // Оставили тип переменной как int
+  float temperatureWeb;
+  String weatherDescription;
 
-  getTemperatureFromWeb(temperatureWeb, precipitationProbability);
+  getTemperatureFromWeb(temperatureWeb, weatherDescription);
   temperatureWeb = round(temperatureWeb);
 
   String currentTime = getCurrentTime();
@@ -403,23 +404,23 @@ void showOutsideWeather() {
   u8g2.setFont(u8g2_font_cu12_t_cyrillic);
   u8g2.setCursor(0, 15);
   u8g2.print("Вулиця: ");
-  u8g2.print(temperatureWeb, 1); // Оставляем только одну десятичную часть
+  u8g2.print(temperatureWeb, 1);
   u8g2.print(" C");
   u8g2.setCursor(0, 30);
-  u8g2.print("Опади: ");
-  u8g2.print(precipitationProbability);
-  u8g2.print(" mm");
+  u8g2.print("Хмари: ");
+  u8g2.print(weatherDescription);
   u8g2.setCursor(0, 45);
   u8g2.print(currentTime);
   u8g2.sendBuffer();
 
   Serial.print("Temperature: ");
-  Serial.print(temperatureWeb, 1); // Оставляем только одну десятичную часть
-  Serial.print(" C, Precipitation (last hour): ");
-  Serial.print(precipitationProbability);
-  Serial.print(" mm, Time:  ");
+  Serial.print(temperatureWeb, 1);
+  Serial.print(" C, Weather: ");
+  Serial.print(weatherDescription);
+  Serial.print(", Time: ");
   Serial.println(currentTime);
 }
+
 
 void readDHTSensor(float& temperature, float& humidity) {
   delay(2000);
