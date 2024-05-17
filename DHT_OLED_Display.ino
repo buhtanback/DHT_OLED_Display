@@ -1,15 +1,16 @@
+#include "Config.h"
 #include "painlessMesh.h"
 #include <DHT.h>
 #include <U8g2lib.h>
 
-#define MESH_PREFIX     "buhtan"
-#define MESH_PASSWORD   "buhtan123"
-#define MESH_PORT       5555
+#define MESH_PREFIX "buhtan"
+#define MESH_PASSWORD "buhtan123"
+#define MESH_PORT 5555
 
 painlessMesh mesh;
 
-#define DHTPIN 4    
-#define DHTTYPE DHT22   
+#define DHTPIN 4
+#define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
 #define OLED_RESET -1
@@ -20,24 +21,28 @@ const long updateInterval = 2000;  // Інтервал оновлень (2000 м
 
 unsigned long lastTempSendTime = 0;  // Час останнього відправлення температури
 unsigned long lastHumiSendTime = 0;  // Час останнього відправлення вологості
-const long sendInterval = 100;  // Мінімальний інтервал між відправленнями (100 мілісекунд)
+const long sendInterval = 300;  // Мінімальний інтервал між відправленнями (300 мілісекунд)
 
 unsigned long startMessageTime = 0; // Час початку показу повідомлення
 const long messageDisplayDuration = 2000; // Тривалість показу повідомлення (2000 мілісекунд = 2 секунди)
 bool showingMessage = true; // Логічна змінна для стану відображення повідомлення
+
+
+void showImage() {
+  u8g2.clearBuffer();
+  u8g2.drawBitmap(0, 0, 16, 128, image);  // Виведення зображення на дисплей
+  u8g2.sendBuffer();
+}
 
 void setup() {
     Serial.begin(115200);
     dht.begin();
 
     u8g2.begin();
-    u8g2.clearBuffer();
-    u8g2.enableUTF8Print();
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-    u8g2.setCursor(10, 35);
-    u8g2.print("ПІШОВ НАХУЙ");
-    u8g2.sendBuffer();  // Відправляємо буфер на дисплей
-    startMessageTime = millis();  // Записуємо час початку показу повідомлення
+    
+    // Показуємо зображення на дисплеї
+    showImage();
+    startMessageTime = millis();  // Записуємо час початку показу зображення
 
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
     mesh.onReceive(&receivedCallback);
@@ -52,8 +57,13 @@ void loop() {
         if (millis() - startMessageTime >= messageDisplayDuration) {
             // Змінюємо стан, щоб припинити показ повідомлення
             showingMessage = false;
+
             u8g2.clearBuffer();
-            u8g2.sendBuffer();  // Очищуємо дисплей після показу повідомлення
+            u8g2.enableUTF8Print();
+            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+            u8g2.setCursor(10, 35);
+            u8g2.print("ДЕ Я НАХУЙ:?");
+            u8g2.sendBuffer();  // Відправляємо буфер на дисплей
         }
     } else {
         // Основний функціонал оновлення дисплею і передачі даних через mesh
