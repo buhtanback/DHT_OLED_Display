@@ -13,6 +13,12 @@ painlessMesh mesh;
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
+#define TRIGGER_PIN 14
+#define ECHO_PIN 27
+
+#define skeletor_width 64
+#define skeletor_height 64
+
 #define OLED_RESET -1
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 
@@ -21,11 +27,15 @@ const long updateInterval = 2000;  // Інтервал оновлень (2000 м
 
 unsigned long lastTempSendTime = 0;  // Час останнього відправлення температури
 unsigned long lastHumiSendTime = 0;  // Час останнього відправлення вологості
-const long sendInterval = 300;  // Мінімальний інтервал між відправленнями (300 мілісекунд)
+const long sendInterval = 500;  // Мінімальний інтервал між відправленнями (500 мілісекунд)
 
 unsigned long startMessageTime = 0; // Час початку показу повідомлення
 const long messageDisplayDuration = 2000; // Тривалість показу повідомлення (2000 мілісекунд = 2 секунди)
 bool showingMessage = true; // Логічна змінна для стану відображення повідомлення
+
+bool isAnimating = false; // Логічна змінна для стану анімації
+unsigned long lastAnimationTime = 0; // Час останньої анімації
+
 
 
 void showImage() {
@@ -34,9 +44,21 @@ void showImage() {
   u8g2.sendBuffer();
 }
 
+void showMessage() {
+  u8g2.clearBuffer();
+  u8g2.enableUTF8Print();
+  u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+  u8g2.setCursor(10, 35);
+  u8g2.print("ДЕ Я НАХУЙ:?");
+  u8g2.sendBuffer();  // Відправляємо буфер на дисплей
+}
+
 void setup() {
     Serial.begin(115200);
     dht.begin();
+
+    pinMode(TRIGGER_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
 
     u8g2.begin();
     
@@ -49,6 +71,37 @@ void setup() {
     mesh.onNewConnection(&newConnectionCallback);
 }
 
+float measureDistance() {
+    digitalWrite(TRIGGER_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIGGER_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIGGER_PIN, LOW);
+
+    float duration = pulseIn(ECHO_PIN, HIGH);
+    float distance = duration * 0.034 / 2;
+
+    return distance;
+}
+
+void animateTriangle() {
+    if (millis() - lastAnimationTime >= 100) { // інтервал анімації 100 мс
+        lastAnimationTime = millis();
+        u8g2.clearBuffer();
+        static uint8_t a = 0;
+
+        switch (a % 4) { 
+        case 0: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[0]); break;
+        case 1: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[1]); break;
+        case 2: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[2]); break;
+        case 3: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[3]); break;
+        }
+
+        u8g2.sendBuffer();
+        a++;
+    }
+}
+
 void loop() {
     mesh.update();  // Оновлення стану mesh мережі
 
@@ -57,47 +110,68 @@ void loop() {
         if (millis() - startMessageTime >= messageDisplayDuration) {
             // Змінюємо стан, щоб припинити показ повідомлення
             showingMessage = false;
-
-            u8g2.clearBuffer();
-            u8g2.enableUTF8Print();
-            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-            u8g2.setCursor(10, 35);
-            u8g2.print("ДЕ Я НАХУЙ:?");
-            u8g2.sendBuffer();  // Відправляємо буфер на дисплей
+            showMessage();
+            startMessageTime = millis();  // Оновлюємо час початку показу повідомлення
         }
     } else {
-        // Основний функціонал оновлення дисплею і передачі даних через mesh
-        if (millis() - lastUpdateTime >= updateInterval) {
-            lastUpdateTime = millis();
+        float distance = measureDistance();
 
-            float temperature = dht.readTemperature();
-            float humidity = dht.readHumidity();
+        Serial.printf("Measured distance: %.2f cm\n", distance); // Додаємо вивід виміряної відстані для налагодження
 
-            u8g2.clearBuffer();
-            u8g2.enableUTF8Print();
-            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-            u8g2.setCursor(0, 15);
-            u8g2.printf("Кімната: %.2f C", temperature);
-            u8g2.setCursor(0, 30);
-            u8g2.printf("Волога: %.2f %%", humidity);
-            u8g2.sendBuffer();
+        if (distance <= 25) {
+            isAnimating = true;
+        } else {
+            isAnimating = false;
+        }
 
-            Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
+        if (isAnimating) {
+            animateTriangle();
+        } else {
+            // Основний функціонал оновлення дисплею і передачі даних через mesh
+            if (millis() - lastUpdateTime >= updateInterval) {
+                lastUpdateTime = millis();
 
-            // Відправлення окремих повідомлень з мінімальною затримкою
-            unsigned long currentMillis = millis();
-            if (currentMillis - lastTempSendTime >= sendInterval) {
-                lastTempSendTime = currentMillis;
-                char tempMsg[20];
-                sprintf(tempMsg, "05%.2f", temperature);
-                mesh.sendBroadcast(tempMsg);
-            }
+                float temperature = dht.readTemperature();
+                float humidity = dht.readHumidity();
 
-            if (currentMillis - lastHumiSendTime >= sendInterval) {
-                lastHumiSendTime = currentMillis;
-                char humiMsg[20];
-                sprintf(humiMsg, "06%.2f", humidity);
-                mesh.sendBroadcast(humiMsg);
+                u8g2.clearBuffer();
+                u8g2.enableUTF8Print();
+                u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+                u8g2.setCursor(0, 15);
+                u8g2.printf("Кімната: %.2f C", temperature);
+                u8g2.setCursor(0, 30);
+                u8g2.printf("Волога: %.2f %%", humidity);
+                u8g2.sendBuffer();
+
+                Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
+
+                // Відправлення окремих повідомлень з мінімальною затримкою
+                unsigned long currentMillis = millis();
+                if (currentMillis - lastTempSendTime >= sendInterval) {
+                    lastTempSendTime = currentMillis;
+                    char tempMsg[20];
+                    sprintf(tempMsg, "05%.2f", temperature);
+                    mesh.sendBroadcast(tempMsg);
+                }
+
+                if (currentMillis - lastHumiSendTime >= sendInterval + 100) { // Додатковий інтервал для уникнення одночасного відправлення
+                    lastHumiSendTime = currentMillis;
+                    char humiMsg[20];
+                    sprintf(humiMsg, "06%.2f", humidity);
+                    mesh.sendBroadcast(humiMsg);
+                }
+            } else {
+                // Якщо не час оновлювати дисплей, все одно оновлюємо анімацію (щоб дисплей був живим)
+                float temperature = dht.readTemperature();
+                float humidity = dht.readHumidity();
+                u8g2.clearBuffer();
+                u8g2.enableUTF8Print();
+                u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+                u8g2.setCursor(0, 15);
+                u8g2.printf("Кімната: %.2f C", temperature);
+                u8g2.setCursor(0, 30);
+                u8g2.printf("Волога: %.2f %%", humidity);
+                u8g2.sendBuffer();
             }
         }
     }
