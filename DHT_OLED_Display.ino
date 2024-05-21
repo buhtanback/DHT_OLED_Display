@@ -2,6 +2,9 @@
 #include "painlessMesh.h"
 #include <DHT.h>
 #include <U8g2lib.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 #define MESH_PREFIX "buhtan"
 #define MESH_PASSWORD "buhtan123"
@@ -15,6 +18,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
 #define TRIGGER_PIN 14
 #define ECHO_PIN 27
+
 
 #define skeletor_width 64
 #define skeletor_height 64
@@ -41,6 +45,33 @@ unsigned long lastAnimationTime = 0; // Last update time for the animation
 
 
 
+
+String currentTime = "Loading...";
+unsigned long lastTimeUpdate = 0;
+const long timeUpdateInterval = 60000; // 60 секунд
+
+void updateTime() {
+    if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+        http.begin("http://worldtimeapi.org/api/timezone/Europe/Kiev");
+        int httpCode = http.GET();
+        
+        if (httpCode > 0) {
+            String payload = http.getString();
+            DynamicJsonDocument doc(1024);
+            deserializeJson(doc, payload);
+            String dateTime = doc["datetime"];
+            currentTime = dateTime.substring(11, 19); // Витягнути час з datetime
+            http.end();
+        } else {
+            currentTime = "Failed to get time";
+            http.end();
+        }
+    } else {
+        currentTime = "Not connected to WiFi";
+    }
+}
+
 void animateTriangle() {
     if (millis() - lastAnimationTime >= 100) { // Animation interval 100 ms
         lastAnimationTime = millis();
@@ -62,6 +93,7 @@ void animateTriangle() {
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
+
     u8g2.clearBuffer();
     u8g2.enableUTF8Print();
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
@@ -69,11 +101,14 @@ void showTemperatureAndHumidity() {
     u8g2.printf("Кімната: %.2f C", temperature);
     u8g2.setCursor(0, 30);
     u8g2.printf("Волога: %.2f %%", humidity);
+    u8g2.setCursor(0, 45);
+    u8g2.printf("Час: %s", currentTime.c_str());
     u8g2.sendBuffer();
 
     // Update serial monitor if the interval has passed
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
         Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
+        Serial.printf("Time: %s\n", currentTime.c_str());
         lastSerialUpdateTime = millis();
     }
 }
@@ -104,6 +139,17 @@ void setup() {
     pinMode(ECHO_PIN, INPUT);
 
     u8g2.begin();
+
+    // Connect to Wi-Fi
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.println("Connecting to WiFi...");
+    }
+    Serial.println("Connected to WiFi");
+
+    updateTime(); // Initial time update
+
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
     mesh.onReceive(&receivedCallback);
     mesh.onNewConnection(&newConnectionCallback);
@@ -111,6 +157,12 @@ void setup() {
 
 void loop() {
     mesh.update(); // Updating mesh network state
+
+    // Update time every timeUpdateInterval
+    if (millis() - lastTimeUpdate >= timeUpdateInterval) {
+        updateTime();
+        lastTimeUpdate = millis();
+    }
 
     float distance = measureDistance();
 
