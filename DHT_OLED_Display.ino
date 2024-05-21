@@ -31,6 +31,9 @@ unsigned long stopwatchStartTime = 0; // Stopwatch start time
 unsigned long stopwatchElapsedTime = 0; // Elapsed time of the stopwatch
 bool lastSensorActive = false; // Last state of the sensor
 
+unsigned long lastSerialUpdateTime = 0; // Last update time for the serial monitor (stopwatch)
+const long serialUpdateInterval = 1000; // Interval for updating the serial monitor (1000 milliseconds = 1 second)
+
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
@@ -44,7 +47,11 @@ void showTemperatureAndHumidity() {
     u8g2.printf("Волога: %.2f %%", humidity);
     u8g2.sendBuffer();
 
-    Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
+    // Update serial monitor if the interval has passed
+    if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
+        Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
+        lastSerialUpdateTime = millis();
+    }
 }
 
 void showStopwatch() {
@@ -57,6 +64,12 @@ void showStopwatch() {
     u8g2.setCursor(0, 15);
     u8g2.printf("Секундомір: %02d:%02d", minutes, seconds);
     u8g2.sendBuffer();
+
+    // Update serial monitor if the interval has passed
+    if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
+        Serial.printf("Stopwatch time: %02d:%02d\n", minutes, seconds);
+        lastSerialUpdateTime = millis();
+    }
 }
 
 void setup() {
@@ -76,7 +89,6 @@ void loop() {
     mesh.update(); // Updating mesh network state
 
     float distance = measureDistance();
-    Serial.printf("Measured distance: %.2f cm\n", distance);
 
     // Determine if the sensor is active
     bool sensorActive = (distance <= 25);
