@@ -16,6 +16,9 @@ DHT dht(DHTPIN, DHTTYPE);
 #define TRIGGER_PIN 14
 #define ECHO_PIN 27
 
+#define skeletor_width 64
+#define skeletor_height 64
+
 #define OLED_RESET -1
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 
@@ -34,10 +37,31 @@ bool lastSensorActive = false; // Last state of the sensor
 unsigned long lastSerialUpdateTime = 0; // Last update time for the serial monitor (stopwatch)
 const long serialUpdateInterval = 1000; // Interval for updating the serial monitor (1000 milliseconds = 1 second)
 
+unsigned long lastAnimationTime = 0; // Last update time for the animation
+
+
+
+void animateTriangle() {
+    if (millis() - lastAnimationTime >= 100) { // Animation interval 100 ms
+        lastAnimationTime = millis();
+        u8g2.clearBuffer();
+        static uint8_t a = 0;
+
+        switch (a % 4) { 
+        case 0: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[0]); break;
+        case 1: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[1]); break;
+        case 2: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[2]); break;
+        case 3: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[3]); break;
+        }
+
+        u8g2.sendBuffer();
+        a++;
+    }
+}
+
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
-
     u8g2.clearBuffer();
     u8g2.enableUTF8Print();
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
@@ -112,7 +136,9 @@ void loop() {
     lastSensorActive = sensorActive;
 
     // Display appropriate screen
-    if (isStopwatchActive) {
+    if (distance < 5) {
+        animateTriangle();
+    } else if (isStopwatchActive) {
         showStopwatch();
     } else {
         showTemperatureAndHumidity();
