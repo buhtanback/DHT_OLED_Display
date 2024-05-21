@@ -146,7 +146,7 @@ void showTemperatureAndHumidity() {
     if (abs(temperature - lastTemperature) >= 0.1 || abs(humidity - lastHumidity) >= 1.0) {
         lastTemperature = temperature;
         lastHumidity = humidity;
-        sendTemperatureAndHumidityData();
+        sendTemperatureAndHumidityData(temperature, humidity); // передаємо температуру та вологість
     }
 }
 
@@ -242,6 +242,14 @@ void loop() {
         }
         lastMillis = millis();
     }
+
+    // Send temperature and humidity data to mesh network
+    if (millis() - lastTempSendTime >= updateInterval) {
+        lastTempSendTime = millis();
+        float temperature = dht.readTemperature();
+        float humidity = dht.readHumidity();
+        sendTemperatureAndHumidityData(temperature, humidity); // передаємо температуру та вологість
+    }
 }
 
 void receivedCallback(uint32_t from, String &msg) {
@@ -263,9 +271,7 @@ float measureDistance() {
     return duration * 0.034 / 2;
 }
 
-void sendTemperatureAndHumidityData() {
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
+void sendTemperatureAndHumidityData(float temperature, float humidity) {
     char tempMsg[20], humiMsg[20];
     sprintf(tempMsg, "05%.2f", temperature);
     sprintf(humiMsg, "06%.2f", humidity);
