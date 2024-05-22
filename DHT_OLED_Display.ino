@@ -57,6 +57,24 @@ int lastPrintedSecond = -1;
 float lastTemperature = 0.0;
 float lastHumidity = 0.0;
 
+String weatherDescription;
+float weatherTemp;
+
+bool isWelcomeScreenShown = false; // Додана змінна для відстеження стану привітання
+
+// Прототипи функцій
+void connectToWiFi();
+void updateTime();
+void updateWeather();
+void showWeather();
+void showTemperatureAndHumidity();
+void showStopwatch();
+void showImage();
+void sendTemperatureAndHumidityData(float temperature, float humidity);
+float measureDistance();
+void receivedCallback(uint32_t from, String &msg);
+void newConnectionCallback(uint32_t nodeId);
+
 void connectToWiFi() {
     Serial.println("Attempting to connect to WiFi...");
     WiFi.begin(ssid, password);
@@ -101,22 +119,39 @@ void updateTime() {
     }
 }
 
-void animateTriangle() {
-    if (millis() - lastAnimationTime >= 100) { // Animation interval 100 ms
-        lastAnimationTime = millis();
-        u8g2.clearBuffer();
-        static uint8_t a = 0;
+void updateWeather() {
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Attempting to update weather...");
+        HTTPClient http;
+        http.begin("http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&lang=ua&appid=89b5c4878e84804573dae7a6c3628e94&units=metric");
+        int httpCode = http.GET();
 
-        switch (a % 4) { 
-        case 0: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[0]); break;
-        case 1: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[1]); break;
-        case 2: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[2]); break;
-        case 3: u8g2.drawXBMP(32, 0, skeletor_width, skeletor_height, skeletor_bits[3]); break;
+        if (httpCode > 0) {
+            String payload = http.getString();
+            Serial.println("Weather Payload: " + payload);  // Додано для налагодження
+            DynamicJsonDocument doc(2048);
+            deserializeJson(doc, payload);
+            weatherDescription = doc["weather"][0]["description"].as<String>();
+            weatherTemp = doc["main"]["temp"];
+            Serial.printf("Weather updated: %s, %.2f °C\n", weatherDescription.c_str(), weatherTemp);
+        } else {
+            Serial.println("HTTP GET failed: " + String(httpCode));
         }
-
-        u8g2.sendBuffer();
-        a++;
+        http.end();
+    } else {
+        Serial.println("Not connected to WiFi");
     }
+}
+
+void showWeather() {
+    u8g2.clearBuffer();
+    u8g2.enableUTF8Print();
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+    u8g2.setCursor(0, 15);
+    u8g2.printf(" %s", weatherDescription.c_str());
+    u8g2.setCursor(0, 30);
+    u8g2.printf("Вулиця: %.2f C", weatherTemp);
+    u8g2.sendBuffer();
 }
 
 void showTemperatureAndHumidity() {
@@ -169,11 +204,18 @@ void showStopwatch() {
     }
 }
 
+void showImage() {
+    u8g2.clearBuffer();
+    u8g2.drawBitmap(0, 0, 16, 128, image);
+    u8g2.sendBuffer();
+}
+
 void setup() {
     Serial.begin(115200);
     dht.begin();
     connectToWiFi();
     updateTime(); // Initial time update
+    updateWeather(); // Initial weather update
 
     pinMode(TRIGGER_PIN, OUTPUT);
     pinMode(ECHO_PIN, INPUT);
@@ -182,6 +224,10 @@ void setup() {
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
     mesh.onReceive(&receivedCallback);
     mesh.onNewConnection(&newConnectionCallback);
+    
+    showImage(); // Показати картинку привітання при запуску
+    delay(5000); // Затримка для показу привітання (5 секунд)
+    isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
 }
 
 void loop() {
@@ -211,8 +257,12 @@ void loop() {
     lastSensorActive = sensorActive;
 
     // Display appropriate screen
-    if (distance < 5) {
-        animateTriangle();
+    if (!isWelcomeScreenShown) {
+        showImage();
+        delay(5000);
+        isWelcomeScreenShown = true;
+    } else if (distance < 5) {
+        showWeather(); // Показати погоду замість анімації
     } else if (isStopwatchActive) {
         showStopwatch();
     } else {
@@ -224,6 +274,12 @@ void loop() {
         Serial.println("Updating time...");
         updateTime();
         lastTimeUpdate = millis();
+    }
+
+    // Update weather every 10 minutes
+    if (millis() - lastTimeUpdate >= 600000) { // 600000 milliseconds = 10 minutes
+        Serial.println("Updating weather...");
+        updateWeather();
     }
 
     // Update seconds based on millis
@@ -248,6 +304,7 @@ void loop() {
         lastTempSendTime = millis();
         float temperature = dht.readTemperature();
         float humidity = dht.readHumidity();
+        Serial.println("Sending temperature and humidity data to mesh network...");
         sendTemperatureAndHumidityData(temperature, humidity); // передаємо температуру та вологість
     }
 }
