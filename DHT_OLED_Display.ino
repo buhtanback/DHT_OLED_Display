@@ -42,8 +42,6 @@ const long serialUpdateInterval = 1000; // Interval for updating the serial moni
 
 unsigned long lastAnimationTime = 0; // Last update time for the animation
 
-
-
 String currentTime = "Loading...";
 unsigned long lastTimeUpdate = 0;
 const long timeUpdateInterval = 60000; // 60 секунд
@@ -61,6 +59,9 @@ String weatherDescription;
 float weatherTemp;
 
 bool isWelcomeScreenShown = false; // Додана змінна для відстеження стану привітання
+
+unsigned long lastDistanceMeasureTime = 0; // Last time distance was measured
+const unsigned long distanceMeasureInterval = 500; // Interval between distance measurements (500 milliseconds)
 
 // Прототипи функцій
 void connectToWiFi();
@@ -233,57 +234,64 @@ void setup() {
 void loop() {
     mesh.update(); // Updating mesh network state
 
-    float distance = measureDistance();
+    unsigned long currentMillis = millis();
 
-    // Determine if the sensor is active
-    bool sensorActive = (distance <= 25);
+    // Measure distance at a defined interval
+    if (currentMillis - lastDistanceMeasureTime >= distanceMeasureInterval) {
+        float distance = measureDistance();
 
-    // Check for state transition
-    if (sensorActive && !lastSensorActive) {
-        // Sensor just became active
-        if (!isStopwatchActive) {
-            isStopwatchActive = true;
-            stopwatchStartTime = millis();
-            Serial.println("Stopwatch started.");
-        } else {
-            // If the stopwatch was already active, stop it
-            isStopwatchActive = false;
-            stopwatchElapsedTime = millis() - stopwatchStartTime;
-            Serial.println("Stopwatch stopped.");
+        // Determine if the sensor is active
+        bool sensorActive = (distance <= 25);
+
+        // Check for state transition
+        if (sensorActive && !lastSensorActive) {
+            // Sensor just became active
+            if (!isStopwatchActive) {
+                isStopwatchActive = true;
+                stopwatchStartTime = millis();
+                Serial.println("Stopwatch started.");
+            } else {
+                // If the stopwatch was already active, stop it
+                isStopwatchActive = false;
+                stopwatchElapsedTime = millis() - stopwatchStartTime;
+                Serial.println("Stopwatch stopped.");
+            }
         }
-    }
 
-    // Update last sensor state
-    lastSensorActive = sensorActive;
+        // Update last sensor state
+        lastSensorActive = sensorActive;
 
-    // Display appropriate screen
-    if (!isWelcomeScreenShown) {
-        showImage();
-        delay(5000);
-        isWelcomeScreenShown = true;
-    } else if (distance < 5) {
-        showWeather(); // Показати погоду замість анімації
-    } else if (isStopwatchActive) {
-        showStopwatch();
-    } else {
-        showTemperatureAndHumidity();
+        // Display appropriate screen
+        if (!isWelcomeScreenShown) {
+            showImage();
+            delay(5000);
+            isWelcomeScreenShown = true;
+        } else if (distance < 5) {
+            showWeather(); // Показати погоду замість анімації
+        } else if (isStopwatchActive) {
+            showStopwatch();
+        } else {
+            showTemperatureAndHumidity();
+        }
+
+        lastDistanceMeasureTime = currentMillis;
     }
 
     // Update time every 60 seconds
-    if (millis() - lastTimeUpdate >= timeUpdateInterval) {
+    if (currentMillis - lastTimeUpdate >= timeUpdateInterval) {
         Serial.println("Updating time...");
         updateTime();
-        lastTimeUpdate = millis();
+        lastTimeUpdate = currentMillis;
     }
 
     // Update weather every 10 minutes
-    if (millis() - lastTimeUpdate >= 600000) { // 600000 milliseconds = 10 minutes
+    if (currentMillis - lastTimeUpdate >= 600000) { // 600000 milliseconds = 10 minutes
         Serial.println("Updating weather...");
         updateWeather();
     }
 
     // Update seconds based on millis
-    if (millis() - lastMillis >= 1000) {
+    if (currentMillis - lastMillis >= 1000) {
         currentSecond++;
         if (currentSecond >= 60) {
             currentSecond = 0;
@@ -296,12 +304,12 @@ void loop() {
                 }
             }
         }
-        lastMillis = millis();
+        lastMillis = currentMillis;
     }
 
     // Send temperature and humidity data to mesh network
-    if (millis() - lastTempSendTime >= updateInterval) {
-        lastTempSendTime = millis();
+    if (currentMillis - lastTempSendTime >= updateInterval) {
+        lastTempSendTime = currentMillis;
         float temperature = dht.readTemperature();
         float humidity = dht.readHumidity();
         Serial.println("Sending temperature and humidity data to mesh network...");
