@@ -43,6 +43,7 @@ const long serialUpdateInterval = 1000; // Interval for updating the serial moni
 unsigned long lastAnimationTime = 0; // Last update time for the animation
 
 String currentTime = "Loading...";
+String currentDate = "Loading..."; // Змінна для зберігання дати
 unsigned long lastTimeUpdate = 0;
 const long timeUpdateInterval = 60000; // 60 секунд
 unsigned long lastMillis = 0;
@@ -105,12 +106,14 @@ void updateTime() {
             DynamicJsonDocument doc(1024);
             deserializeJson(doc, payload);
             String dateTime = doc["datetime"];
+            currentDate = dateTime.substring(2, 4) + "-" + dateTime.substring(5, 7).toInt() + "-" + dateTime.substring(8, 10); // Витягнути дату в потрібному форматі
             currentTime = dateTime.substring(11, 19); // Витягнути час з datetime
             currentHour = currentTime.substring(0, 2).toInt();
             currentMinute = currentTime.substring(3, 5).toInt();
             currentSecond = currentTime.substring(6, 8).toInt();
             lastMillis = millis();
             Serial.println("Time updated: " + currentTime);
+            Serial.println("Date updated: " + currentDate);
         } else {
             Serial.println("HTTP GET failed: " + String(httpCode));
         }
@@ -167,13 +170,13 @@ void showTemperatureAndHumidity() {
     u8g2.setCursor(0, 30);
     u8g2.printf("Волога: %.2f %%", humidity);
     u8g2.setCursor(0, 45);
-    u8g2.printf("Час: %02d:%02d:%02d", currentHour, currentMinute, currentSecond);
+    u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
     u8g2.sendBuffer();
 
     // Update serial monitor if the interval has passed
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval && currentSecond != lastPrintedSecond) {
         Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
-        Serial.printf("Current Time: %02d:%02d:%02d\n", currentHour, currentMinute, currentSecond);
+        Serial.printf("Current Date and Time: %s %02d:%02d:%02d\n", currentDate.c_str(), currentHour, currentMinute, currentSecond);
         lastSerialUpdateTime = millis();
         lastPrintedSecond = currentSecond;
     }
