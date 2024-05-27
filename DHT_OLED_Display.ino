@@ -60,9 +60,16 @@ String weatherDescription;
 float weatherTemp;
 
 bool isWelcomeScreenShown = false; // Додана змінна для відстеження стану привітання
+unsigned long welcomeScreenStartTime = 0; // Час початку показу екрану привітання
+const unsigned long welcomeScreenDuration = 5000; // Тривалість показу екрану привітання (5 секунд)
 
 unsigned long lastDistanceMeasureTime = 0; // Last time distance was measured
 const unsigned long distanceMeasureInterval = 500; // Interval between distance measurements (500 milliseconds)
+
+// Змінні для обробки серійного вводу
+String lastSerialInput = "";
+unsigned long lastSerialInputTime = 0;
+const long serialDisplayDuration = 5000; // 5 секунд
 
 // Прототипи функцій
 void connectToWiFi();
@@ -76,6 +83,8 @@ void sendTemperatureAndHumidityData(float temperature, float humidity);
 float measureDistance();
 void receivedCallback(uint32_t from, String &msg);
 void newConnectionCallback(uint32_t nodeId);
+void handleSerialInput();
+void checkSerialDisplayTimeout();
 
 void connectToWiFi() {
     Serial.println("Attempting to connect to WiFi...");
@@ -214,6 +223,24 @@ void showImage() {
     u8g2.sendBuffer();
 }
 
+void handleSerialInput() {
+    if (Serial.available() > 0) {
+        lastSerialInput = Serial.readStringUntil('\n');
+        lastSerialInputTime = millis();
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+        u8g2.setCursor(0, 30);
+        u8g2.printf("%s", lastSerialInput.c_str());
+        u8g2.sendBuffer();
+    }
+}
+
+void checkSerialDisplayTimeout() {
+    if (millis() - lastSerialInputTime >= serialDisplayDuration) {
+        lastSerialInput = "";
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     dht.begin();
@@ -230,7 +257,7 @@ void setup() {
     mesh.onNewConnection(&newConnectionCallback);
     
     showImage(); // Показати картинку привітання при запуску
-    delay(5000); // Затримка для показу привітання (5 секунд)
+    welcomeScreenStartTime = millis(); // Записати час початку показу екрану привітання
     isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
 }
 
@@ -238,6 +265,11 @@ void loop() {
     mesh.update(); // Updating mesh network state
 
     unsigned long currentMillis = millis();
+
+    // Якщо екран привітання показується більше визначеного часу, перейти до стандартного екрану
+    if (isWelcomeScreenShown && (currentMillis - welcomeScreenStartTime >= welcomeScreenDuration)) {
+        isWelcomeScreenShown = false;
+    }
 
     // Measure distance at a defined interval
     if (currentMillis - lastDistanceMeasureTime >= distanceMeasureInterval) {
@@ -263,19 +295,6 @@ void loop() {
 
         // Update last sensor state
         lastSensorActive = sensorActive;
-
-        // Display appropriate screen
-        if (!isWelcomeScreenShown) {
-            showImage();
-            delay(5000);
-            isWelcomeScreenShown = true;
-        } else if (distance < 5) {
-            showWeather(); // Показати погоду замість анімації
-        } else if (isStopwatchActive) {
-            showStopwatch();
-        } else {
-            showTemperatureAndHumidity();
-        }
 
         lastDistanceMeasureTime = currentMillis;
     }
@@ -317,6 +336,23 @@ void loop() {
         float humidity = dht.readHumidity();
         Serial.println("Sending temperature and humidity data to mesh network...");
         sendTemperatureAndHumidityData(temperature, humidity); // передаємо температуру та вологість
+    }
+
+    // Handle serial input
+    handleSerialInput();
+
+    // Check if the serial input display duration has passed
+    checkSerialDisplayTimeout();
+
+    // If no serial input, show the default screen
+    if (lastSerialInput == "") {
+        if (isWelcomeScreenShown) {
+            showImage();
+        } else if (isStopwatchActive) {
+            showStopwatch();
+        } else {
+            showTemperatureAndHumidity();
+        }
     }
 }
 
