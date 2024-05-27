@@ -60,8 +60,6 @@ String weatherDescription;
 float weatherTemp;
 
 bool isWelcomeScreenShown = false; // Додана змінна для відстеження стану привітання
-unsigned long welcomeScreenStartTime = 0; // Час початку показу екрану привітання
-const unsigned long welcomeScreenDuration = 5000; // Тривалість показу екрану привітання (5 секунд)
 
 unsigned long lastDistanceMeasureTime = 0; // Last time distance was measured
 const unsigned long distanceMeasureInterval = 500; // Interval between distance measurements (500 milliseconds)
@@ -70,6 +68,11 @@ const unsigned long distanceMeasureInterval = 500; // Interval between distance 
 String lastSerialInput = "";
 unsigned long lastSerialInputTime = 0;
 const long serialDisplayDuration = 5000; // 5 секунд
+
+// Змінні для таймера
+bool isTimerActive = false;
+unsigned long timerStartTime = 0;
+unsigned long timerDuration = 0;
 
 // Прототипи функцій
 void connectToWiFi();
@@ -85,6 +88,9 @@ void receivedCallback(uint32_t from, String &msg);
 void newConnectionCallback(uint32_t nodeId);
 void handleSerialInput();
 void checkSerialDisplayTimeout();
+void showTimer();
+void startTimer(int durationInSeconds);
+void stopTimer();
 
 void connectToWiFi() {
     Serial.println("Attempting to connect to WiFi...");
@@ -223,24 +229,6 @@ void showImage() {
     u8g2.sendBuffer();
 }
 
-void handleSerialInput() {
-    if (Serial.available() > 0) {
-        lastSerialInput = Serial.readStringUntil('\n');
-        lastSerialInputTime = millis();
-        u8g2.clearBuffer();
-        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-        u8g2.setCursor(0, 30);
-        u8g2.printf("%s", lastSerialInput.c_str());
-        u8g2.sendBuffer();
-    }
-}
-
-void checkSerialDisplayTimeout() {
-    if (millis() - lastSerialInputTime >= serialDisplayDuration) {
-        lastSerialInput = "";
-    }
-}
-
 void setup() {
     Serial.begin(115200);
     dht.begin();
@@ -257,7 +245,7 @@ void setup() {
     mesh.onNewConnection(&newConnectionCallback);
     
     showImage(); // Показати картинку привітання при запуску
-    welcomeScreenStartTime = millis(); // Записати час початку показу екрану привітання
+    delay(5000); // Затримка для показу привітання (5 секунд)
     isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
 }
 
@@ -265,11 +253,6 @@ void loop() {
     mesh.update(); // Updating mesh network state
 
     unsigned long currentMillis = millis();
-
-    // Якщо екран привітання показується більше визначеного часу, перейти до стандартного екрану
-    if (isWelcomeScreenShown && (currentMillis - welcomeScreenStartTime >= welcomeScreenDuration)) {
-        isWelcomeScreenShown = false;
-    }
 
     // Measure distance at a defined interval
     if (currentMillis - lastDistanceMeasureTime >= distanceMeasureInterval) {
@@ -281,11 +264,11 @@ void loop() {
         // Check for state transition
         if (sensorActive && !lastSensorActive) {
             // Sensor just became active
-            if (!isStopwatchActive) {
+            if (!isStopwatchActive && !isTimerActive) { // Only start stopwatch if timer is not active
                 isStopwatchActive = true;
                 stopwatchStartTime = millis();
                 Serial.println("Stopwatch started.");
-            } else {
+            } else if (isStopwatchActive) {
                 // If the stopwatch was already active, stop it
                 isStopwatchActive = false;
                 stopwatchElapsedTime = millis() - stopwatchStartTime;
@@ -295,6 +278,21 @@ void loop() {
 
         // Update last sensor state
         lastSensorActive = sensorActive;
+
+        // Display appropriate screen
+        if (!isWelcomeScreenShown) {
+            showImage();
+            delay(5000);
+            isWelcomeScreenShown = true;
+        } else if (distance < 5) {
+            showWeather(); // Показати погоду замість анімації
+        } else if (isStopwatchActive) {
+            showStopwatch();
+        } else if (isTimerActive) {
+            showTimer(); // Show timer if active
+        } else {
+            showTemperatureAndHumidity();
+        }
 
         lastDistanceMeasureTime = currentMillis;
     }
@@ -341,17 +339,15 @@ void loop() {
     // Handle serial input
     handleSerialInput();
 
-    // Check if the serial input display duration has passed
+    // Check if serial display timeout has occurred
     checkSerialDisplayTimeout();
 
-    // If no serial input, show the default screen
-    if (lastSerialInput == "") {
-        if (isWelcomeScreenShown) {
-            showImage();
-        } else if (isStopwatchActive) {
-            showStopwatch();
+    // Update the timer
+    if (isTimerActive) {
+        if (currentMillis - timerStartTime >= timerDuration) {
+            stopTimer();
         } else {
-            showTemperatureAndHumidity();
+            showTimer();
         }
     }
 }
@@ -382,4 +378,56 @@ void sendTemperatureAndHumidityData(float temperature, float humidity) {
     mesh.sendBroadcast(tempMsg);
     mesh.sendBroadcast(humiMsg);
     Serial.printf("Sent to mesh: Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity); // Debugging output
+}
+
+void handleSerialInput() {
+    if (Serial.available() > 0) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+
+        if (input.startsWith("start=")) {
+            int minutes = input.substring(6).toInt();
+            startTimer(minutes * 60); // Convert minutes to seconds
+        } else if (input == "stop") {
+            stopTimer();
+        } else {
+            lastSerialInput = input;
+            lastSerialInputTime = millis();
+        }
+    }
+}
+
+void checkSerialDisplayTimeout() {
+    if (lastSerialInput != "" && millis() - lastSerialInputTime >= serialDisplayDuration) {
+        lastSerialInput = "";
+        showTemperatureAndHumidity();
+    }
+}
+
+void showTimer() {
+    unsigned long elapsed = millis() - timerStartTime;
+    unsigned long remaining = timerDuration - elapsed;
+
+    int seconds = (remaining / 1000) % 60;
+    int minutes = (remaining / 60000) % 60;
+    int hours = (remaining / 3600000);
+
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+    u8g2.setCursor(0, 15);
+    u8g2.printf("Таймер: %02d:%02d:%02d", hours, minutes, seconds);
+    u8g2.sendBuffer();
+}
+
+void startTimer(int durationInSeconds) {
+    isTimerActive = true;
+    timerStartTime = millis();
+    timerDuration = durationInSeconds * 1000;
+    Serial.printf("Timer started for %d seconds\n", durationInSeconds);
+}
+
+void stopTimer() {
+    isTimerActive = false;
+    Serial.println("Timer stopped.");
+    showTemperatureAndHumidity(); // Return to room information after timer stops
 }
