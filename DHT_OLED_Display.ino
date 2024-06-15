@@ -25,6 +25,10 @@ DHT dht(DHTPIN, DHTTYPE);
 #define OLED_RESET -1
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 
+unsigned long welcomeScreenStartTime = 0;
+bool isWelcomeScreenVisible = false;
+
+
 unsigned long lastUpdateTime = 0; // Time of the last update
 const long updateInterval = 2000; // Update interval (2000 milliseconds = 2 seconds)
 
@@ -170,6 +174,8 @@ void showWeather() {
     u8g2.printf(" %s", weatherDescription.c_str());
     u8g2.setCursor(0, 30);
     u8g2.printf("Вулиця: %.2f C", weatherTemp);
+    u8g2.setCursor(0, 45);
+    u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
     u8g2.sendBuffer();
 }
 
@@ -188,21 +194,17 @@ void showTemperatureAndHumidity() {
     u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
     u8g2.sendBuffer();
 
-    // Update serial monitor if the interval has passed
-    if (millis() - lastSerialUpdateTime >= serialUpdateInterval && currentSecond != lastPrintedSecond) {
+    // Only send data to the mesh and update serial monitor if there's a significant change
+    if (abs(temperature - lastTemperature) >= 0.1 || abs(humidity - lastHumidity) >= 1.0) {
         Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
         Serial.printf("Current Date and Time: %s %02d:%02d:%02d\n", currentDate.c_str(), currentHour, currentMinute, currentSecond);
-        lastSerialUpdateTime = millis();
-        lastPrintedSecond = currentSecond;
-    }
-
-    // Only send data to the mesh if there's a significant change
-    if (abs(temperature - lastTemperature) >= 0.1 || abs(humidity - lastHumidity) >= 1.0) {
+        sendTemperatureAndHumidityData(temperature, humidity); // Send temperature and humidity data
         lastTemperature = temperature;
         lastHumidity = humidity;
-        sendTemperatureAndHumidityData(temperature, humidity); // передаємо температуру та вологість
     }
 }
+
+
 
 void showStopwatch() {
     unsigned long elapsed = millis() - stopwatchStartTime;
@@ -245,14 +247,21 @@ void setup() {
     mesh.onNewConnection(&newConnectionCallback);
     
     showImage(); // Показати картинку привітання при запуску
-    delay(5000); // Затримка для показу привітання (5 секунд)
-    isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
+    welcomeScreenStartTime = millis();
+    isWelcomeScreenVisible = true;
 }
+
 
 void loop() {
     mesh.update(); // Updating mesh network state
 
     unsigned long currentMillis = millis();
+
+    // Показати привітання протягом 5 секунд при запуску
+    if (isWelcomeScreenVisible && (currentMillis - welcomeScreenStartTime >= 5000)) {
+        isWelcomeScreenVisible = false; // Закінчити показ привітання
+        isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
+    }
 
     // Measure distance at a defined interval
     if (currentMillis - lastDistanceMeasureTime >= distanceMeasureInterval) {
@@ -281,9 +290,7 @@ void loop() {
 
         // Display appropriate screen
         if (!isWelcomeScreenShown) {
-            showImage();
-            delay(5000);
-            isWelcomeScreenShown = true;
+            // Привітання вже було показано раніше, тому тут нічого не робити
         } else if (distance < 5) {
             showWeather(); // Показати погоду замість анімації
         } else if (isStopwatchActive) {
@@ -305,9 +312,10 @@ void loop() {
     }
 
     // Update weather every 10 minutes
-    if (currentMillis - lastTimeUpdate >= 600000) { // 600000 milliseconds = 10 minutes
+    if (currentMillis - lastWeatherUpdate >= 600000) { // 600000 milliseconds = 10 minutes
         Serial.println("Updating weather...");
         updateWeather();
+        lastWeatherUpdate = currentMillis;
     }
 
     // Update seconds based on millis
@@ -325,15 +333,6 @@ void loop() {
             }
         }
         lastMillis = currentMillis;
-    }
-
-    // Send temperature and humidity data to mesh network
-    if (currentMillis - lastTempSendTime >= updateInterval) {
-        lastTempSendTime = currentMillis;
-        float temperature = dht.readTemperature();
-        float humidity = dht.readHumidity();
-        Serial.println("Sending temperature and humidity data to mesh network...");
-        sendTemperatureAndHumidityData(temperature, humidity); // передаємо температуру та вологість
     }
 
     // Handle serial input
