@@ -28,7 +28,6 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 unsigned long welcomeScreenStartTime = 0;
 bool isWelcomeScreenVisible = false;
 
-
 unsigned long lastUpdateTime = 0; // Time of the last update
 const long updateInterval = 2000; // Update interval (2000 milliseconds = 2 seconds)
 
@@ -68,6 +67,8 @@ bool isWelcomeScreenShown = false; // Додана змінна для відс�
 unsigned long lastDistanceMeasureTime = 0; // Last time distance was measured
 const unsigned long distanceMeasureInterval = 500; // Interval between distance measurements (500 milliseconds)
 
+unsigned long lastWeatherUpdate = 0; // Time of the last weather update
+
 // Змінні для обробки серійного вводу
 String lastSerialInput = "";
 unsigned long lastSerialInputTime = 0;
@@ -95,6 +96,7 @@ void checkSerialDisplayTimeout();
 void showTimer();
 void startTimer(int durationInSeconds);
 void stopTimer();
+
 
 void connectToWiFi() {
     Serial.println("Attempting to connect to WiFi...");
@@ -257,40 +259,46 @@ void loop() {
 
     unsigned long currentMillis = millis();
 
+    // Оновлення температури і вологості при зміні значень
+    if (currentMillis - lastTempSendTime >= sendInterval) {
+        float currentTemperature = dht.readTemperature();
+        float currentHumidity = dht.readHumidity();
+
+        // Перевірка чи змінились значення температури або вологості
+        if (abs(currentTemperature - lastTemperature) >= 0.1 || abs(currentHumidity - lastHumidity) >= 1.0) {
+            sendTemperatureAndHumidityData(currentTemperature, currentHumidity);
+            lastTemperature = currentTemperature;
+            lastHumidity = currentHumidity;
+        }
+
+        lastTempSendTime = currentMillis;
+    }
+
     // Показати привітання протягом 5 секунд при запуску
     if (isWelcomeScreenVisible && (currentMillis - welcomeScreenStartTime >= 5000)) {
         isWelcomeScreenVisible = false; // Закінчити показ привітання
         isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
     }
 
-    // Measure distance at a defined interval
+    // Вимірювання відстані
     if (currentMillis - lastDistanceMeasureTime >= distanceMeasureInterval) {
         float distance = measureDistance();
-
-        // Determine if the sensor is active
         bool sensorActive = (distance <= 25);
-
-        // Check for state transition
         if (sensorActive && !lastSensorActive) {
-            // Sensor just became active
-            if (!isStopwatchActive && !isTimerActive) { // Only start stopwatch if timer is not active
+            if (!isStopwatchActive && !isTimerActive) {
                 isStopwatchActive = true;
                 stopwatchStartTime = millis();
                 Serial.println("Stopwatch started.");
             } else if (isStopwatchActive) {
-                // If the stopwatch was already active, stop it
                 isStopwatchActive = false;
                 stopwatchElapsedTime = millis() - stopwatchStartTime;
                 Serial.println("Stopwatch stopped.");
             }
         }
-
-        // Update last sensor state
         lastSensorActive = sensorActive;
 
-        // Display appropriate screen
         if (!isWelcomeScreenShown) {
-            // Привітання вже було показано раніше, тому тут нічого не робити
+            // Показ привітання
         } else if (distance < 5) {
             showWeather(); // Показати погоду замість анімації
         } else if (isStopwatchActive) {
@@ -304,21 +312,21 @@ void loop() {
         lastDistanceMeasureTime = currentMillis;
     }
 
-    // Update time every 60 seconds
+    // Оновлення часу кожні 60 секунд
     if (currentMillis - lastTimeUpdate >= timeUpdateInterval) {
         Serial.println("Updating time...");
         updateTime();
         lastTimeUpdate = currentMillis;
     }
 
-    // Update weather every 10 minutes
+    // Оновлення погоди кожні 10 хвилин
     if (currentMillis - lastWeatherUpdate >= 600000) { // 600000 milliseconds = 10 minutes
         Serial.println("Updating weather...");
         updateWeather();
         lastWeatherUpdate = currentMillis;
     }
 
-    // Update seconds based on millis
+    // Оновлення секунд на основі millis
     if (currentMillis - lastMillis >= 1000) {
         currentSecond++;
         if (currentSecond >= 60) {
@@ -335,13 +343,13 @@ void loop() {
         lastMillis = currentMillis;
     }
 
-    // Handle serial input
+    // Обробка серійного вводу
     handleSerialInput();
 
-    // Check if serial display timeout has occurred
+    // Перевірка чи закінчився тайм-аут для серійного дисплея
     checkSerialDisplayTimeout();
 
-    // Update the timer
+    // Оновлення таймера
     if (isTimerActive) {
         if (currentMillis - timerStartTime >= timerDuration) {
             stopTimer();
