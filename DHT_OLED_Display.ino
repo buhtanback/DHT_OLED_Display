@@ -5,12 +5,21 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP085_U.h>
+
+
 
 #define MESH_PREFIX "buhtan"
 #define MESH_PASSWORD "buhtan123"
 #define MESH_PORT 5555
 
 painlessMesh mesh;
+
+
+
+Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 
 #define DHTPIN 4
 #define DHTTYPE DHT22
@@ -206,7 +215,29 @@ void showTemperatureAndHumidity() {
     }
 }
 
+void readAndDisplayPressure() {
+    sensors_event_t event;
+    bmp.getEvent(&event);
 
+    if (event.pressure) {
+        // Виведення тиску
+        Serial.print("Тиск: ");
+        Serial.print(event.pressure);
+        Serial.println(" hPa");
+        
+        // Відправка даних тиску в mesh-мережу
+        sendPressureData(event.pressure);
+    }
+}
+
+
+
+void sendPressureData(float pressure) {
+    char pressureMsg[20];
+    sprintf(pressureMsg, "07%.2f", pressure);
+    mesh.sendBroadcast(pressureMsg);
+    Serial.printf("Sent to mesh: Pressure: %.2f hPa\n", pressure); // Debugging output
+}
 
 void showStopwatch() {
     unsigned long elapsed = millis() - stopwatchStartTime;
@@ -240,6 +271,12 @@ void setup() {
     updateTime(); // Initial time update
     updateWeather(); // Initial weather update
 
+    // Ініціалізація BMP180
+    if (!bmp.begin()) {
+        Serial.println("Не вдалося знайти BMP180! Перевірте з'єднання.");
+        while (1);
+    }
+
     pinMode(TRIGGER_PIN, OUTPUT);
     pinMode(ECHO_PIN, INPUT);
 
@@ -252,7 +289,6 @@ void setup() {
     welcomeScreenStartTime = millis();
     isWelcomeScreenVisible = true;
 }
-
 
 void loop() {
     mesh.update(); // Updating mesh network state
@@ -356,6 +392,13 @@ void loop() {
         } else {
             showTimer();
         }
+    }
+
+    // Читання і виведення тиску кожні 2 секунди
+    static unsigned long lastPressureReadTime = 0;
+    if (currentMillis - lastPressureReadTime >= 2000) {
+        readAndDisplayPressure();
+        lastPressureReadTime = currentMillis;
     }
 }
 
