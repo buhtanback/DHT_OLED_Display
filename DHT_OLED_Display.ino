@@ -404,6 +404,14 @@ void loop() {
 
 void receivedCallback(uint32_t from, String &msg) {
     Serial.printf("Received from %u: %s\n", from, msg.c_str());
+
+    // Обробка команди для запуску таймера
+    if (msg.startsWith("start=")) {
+        int minutes = msg.substring(6).toInt();
+        startTimer(minutes * 60); // Convert minutes to seconds
+    } else if (msg == "stop") {
+        stopTimer();
+    }
 }
 
 void newConnectionCallback(uint32_t nodeId) {
