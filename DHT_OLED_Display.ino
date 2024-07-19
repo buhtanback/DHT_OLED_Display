@@ -400,6 +400,11 @@ void loop() {
         readAndDisplayPressure();
         lastPressureReadTime = currentMillis;
     }
+
+    // Показ секундоміра
+    if (isStopwatchActive) {
+        showStopwatch();
+    }
 }
 
 void receivedCallback(uint32_t from, String &msg) {
@@ -448,12 +453,25 @@ void handleSerialInput() {
             startTimer(minutes * 60); // Convert minutes to seconds
         } else if (input == "stop") {
             stopTimer();
+        } else if (input == "startStopwatch") {
+            if (!isStopwatchActive) {
+                isStopwatchActive = true;
+                stopwatchStartTime = millis();
+                Serial.println("Stopwatch started.");
+            }
+        } else if (input == "stopStopwatch") {
+            if (isStopwatchActive) {
+                isStopwatchActive = false;
+                stopwatchElapsedTime = millis() - stopwatchStartTime;
+                Serial.println("Stopwatch stopped.");
+            }
         } else {
             lastSerialInput = input;
             lastSerialInputTime = millis();
         }
     }
 }
+
 
 void checkSerialDisplayTimeout() {
     if (lastSerialInput != "" && millis() - lastSerialInputTime >= serialDisplayDuration) {
