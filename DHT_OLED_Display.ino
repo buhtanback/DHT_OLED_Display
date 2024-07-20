@@ -290,17 +290,27 @@ void setup() {
     isWelcomeScreenVisible = true;
 }
 
+
+
+// Додамо змінні для фільтрації
+float previousDistance = 0.0;
+const float DISTANCE_THRESHOLD = 5.0; // Порогова різниця для фільтрації шуму
+
+// Функція для фільтрації вимірювань відстані
+bool isDistanceStable(float currentDistance) {
+    return abs(currentDistance - previousDistance) < DISTANCE_THRESHOLD;
+}
+
 void loop() {
     mesh.update(); // Updating mesh network state
 
     unsigned long currentMillis = millis();
 
-    // Оновлення температури і вологості при зміні значень
+    // Оновлення температури і вологості при зміні значень залишаємо без змін
     if (currentMillis - lastTempSendTime >= sendInterval) {
         float currentTemperature = dht.readTemperature();
         float currentHumidity = dht.readHumidity();
 
-        // Перевірка чи змінились значення температури або вологості
         if (abs(currentTemperature - lastTemperature) >= 0.1 || abs(currentHumidity - lastHumidity) >= 1.0) {
             sendTemperatureAndHumidityData(currentTemperature, currentHumidity);
             lastTemperature = currentTemperature;
@@ -312,35 +322,40 @@ void loop() {
 
     // Показати привітання протягом 5 секунд при запуску
     if (isWelcomeScreenVisible && (currentMillis - welcomeScreenStartTime >= 5000)) {
-        isWelcomeScreenVisible = false; // Закінчити показ привітання
-        isWelcomeScreenShown = true; // Встановити прапорець, що привітання показано
+        isWelcomeScreenVisible = false;
+        isWelcomeScreenShown = true;
     }
 
     // Вимірювання відстані
     if (currentMillis - lastDistanceMeasureTime >= distanceMeasureInterval) {
         float distance = measureDistance();
         bool sensorActive = (distance <= 25);
-        if (sensorActive && !lastSensorActive) {
-            if (!isStopwatchActive && !isTimerActive) {
-                isStopwatchActive = true;
-                stopwatchStartTime = millis();
-                Serial.println("Stopwatch started.");
-            } else if (isStopwatchActive) {
-                isStopwatchActive = false;
-                stopwatchElapsedTime = millis() - stopwatchStartTime;
-                Serial.println("Stopwatch stopped.");
+
+        if (isDistanceStable(distance)) {
+            if (sensorActive && !lastSensorActive) {
+                if (!isStopwatchActive && !isTimerActive) {
+                    isStopwatchActive = true;
+                    stopwatchStartTime = millis();
+                    Serial.println("Stopwatch started.");
+                } else if (isStopwatchActive) {
+                    isStopwatchActive = false;
+                    stopwatchElapsedTime = millis() - stopwatchStartTime;
+                    Serial.println("Stopwatch stopped.");
+                }
             }
+            lastSensorActive = sensorActive;
         }
-        lastSensorActive = sensorActive;
+
+        previousDistance = distance; // Оновлюємо попереднє значення відстані
 
         if (!isWelcomeScreenShown) {
             // Показ привітання
         } else if (distance < 5) {
-            showWeather(); // Показати погоду замість анімації
+            showWeather();
         } else if (isStopwatchActive) {
             showStopwatch();
         } else if (isTimerActive) {
-            showTimer(); // Show timer if active
+            showTimer();
         } else {
             showTemperatureAndHumidity();
         }
@@ -348,21 +363,19 @@ void loop() {
         lastDistanceMeasureTime = currentMillis;
     }
 
-    // Оновлення часу кожні 60 секунд
+    // Оновлення часу і погоди залишаємо без змін
     if (currentMillis - lastTimeUpdate >= timeUpdateInterval) {
         Serial.println("Updating time...");
         updateTime();
         lastTimeUpdate = currentMillis;
     }
 
-    // Оновлення погоди кожні 10 хвилин
     if (currentMillis - lastWeatherUpdate >= 600000) { // 600000 milliseconds = 10 minutes
         Serial.println("Updating weather...");
         updateWeather();
         lastWeatherUpdate = currentMillis;
     }
 
-    // Оновлення секунд на основі millis
     if (currentMillis - lastMillis >= 1000) {
         currentSecond++;
         if (currentSecond >= 60) {
@@ -379,13 +392,9 @@ void loop() {
         lastMillis = currentMillis;
     }
 
-    // Обробка серійного вводу
     handleSerialInput();
-
-    // Перевірка чи закінчився тайм-аут для серійного дисплея
     checkSerialDisplayTimeout();
 
-    // Оновлення таймера
     if (isTimerActive) {
         if (currentMillis - timerStartTime >= timerDuration) {
             stopTimer();
@@ -394,18 +403,18 @@ void loop() {
         }
     }
 
-    // Читання і виведення тиску кожні 2 секунди
     static unsigned long lastPressureReadTime = 0;
     if (currentMillis - lastPressureReadTime >= 2000) {
         readAndDisplayPressure();
         lastPressureReadTime = currentMillis;
     }
 
-    // Показ секундоміра
     if (isStopwatchActive) {
         showStopwatch();
     }
 }
+
+
 
 void receivedCallback(uint32_t from, String &msg) {
     Serial.printf("Received from %u: %s\n", from, msg.c_str());
