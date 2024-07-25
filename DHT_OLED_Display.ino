@@ -1,3 +1,4 @@
+#include "Config.h"
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <DHT.h>
@@ -32,137 +33,149 @@ bool inSubMenu = false; // Прапорець для відстеження чи
 float lastTemperature = 0;
 float lastHumidity = 0;
 
-String currentDate = "2024-07-23";
-int currentHour = 14;
-int currentMinute = 30;
-int currentSecond = 0;
+unsigned long welcomeScreenStartTime = 0;
+bool isWelcomeScreenVisible = false;
+
+
 
 void setup() {
-  pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
-  u8g2.begin(); // Ініціалізація дисплея
-  dht.begin();  // Ініціалізація датчика DHT
-  Serial.begin(115200); // Ініціалізація Serial для діагностики
-  
-  // Ініціалізація мережі
-  mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);  // Встановлення типів повідомлень
-  mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
-  mesh.onReceive([](uint32_t from, String &msg) {
-    Serial.printf("Received from %u msg=%s\n", from, msg.c_str());
-  });
+    pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
+    u8g2.begin(); // Ініціалізація дисплея
+    dht.begin();  // Ініціалізація датчика DHT
+    Serial.begin(115200); // Ініціалізація Serial для діагностики
+    
+    // Ініціалізація мережі
+    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);  // Встановлення типів повідомлень
+    mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
+    mesh.onReceive([](uint32_t from, String &msg) {
+        Serial.printf("Received from %u msg=%s\n", from, msg.c_str());
+    });
+
+    showImage(); // Показати картинку привітання при запуску
+    welcomeScreenStartTime = millis();
+    isWelcomeScreenVisible = true;
 }
 
 void loop() {
-  mesh.update();  // Оновлення стану мережі
+    mesh.update();  // Оновлення стану мережі
+
+    if (isWelcomeScreenVisible) {
+        if (millis() - welcomeScreenStartTime > 3000) { // Показувати картинку привітання протягом 3 секунд
+            isWelcomeScreenVisible = false;
+        } else {
+            return; // Повернення для продовження показу привітання
+        }
+    }
+
+    // Зчитування значення джойстика по осі Y
+    int joystickY = analogRead(JOYSTICK_Y_PIN);
   
-  // Зчитування значення джойстика по осі Y
-  int joystickY = analogRead(JOYSTICK_Y_PIN);
-  
-  if (!inSubMenu) {
-    // Перевірка, чи джойстик був переміщений
-    if (millis() - lastDebounceTime > debounceDelay) {
-      if (joystickY < 1000) { // Вгору
-        menuOption--;
-        if (menuOption < 0) {
-          menuOption = 2;
+    if (!inSubMenu) {
+        // Перевірка, чи джойстик був переміщений
+        if (millis() - lastDebounceTime > debounceDelay) {
+            if (joystickY < 1000) { // Вгору
+                menuOption--;
+                if (menuOption < 0) {
+                    menuOption = 2;
+                }
+                lastDebounceTime = millis();
+                Serial.print("Joystick moved up. New menuOption: ");
+                Serial.println(menuOption);
+            } else if (joystickY > 3000) { // Вниз
+                menuOption++;
+                if (menuOption > 2) {
+                    menuOption = 0;
+                }
+                lastDebounceTime = millis();
+                Serial.print("Joystick moved down. New menuOption: ");
+                Serial.println(menuOption);
+            }
         }
-        lastDebounceTime = millis();
-        Serial.print("Joystick moved up. New menuOption: ");
-        Serial.println(menuOption);
-      } else if (joystickY > 3000) { // Вниз
-        menuOption++;
-        if (menuOption > 2) {
-          menuOption = 0;
+
+        // Зчитування стану кнопки
+        int reading = digitalRead(BUTTON_PIN);
+        if (reading != lastButtonState) {
+            lastDebounceTime = millis();
         }
-        lastDebounceTime = millis();
-        Serial.print("Joystick moved down. New menuOption: ");
-        Serial.println(menuOption);
-      }
-    }
 
-    // Зчитування стану кнопки
-    int reading = digitalRead(BUTTON_PIN);
-    if (reading != lastButtonState) {
-      lastDebounceTime = millis();
-    }
-
-    // Перевірка стану кнопки
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-      if (reading != buttonState) {
-        buttonState = reading;
-        if (buttonState == LOW) {
-          inSubMenu = true;
-          Serial.print("Button pressed. Entering subMenu: ");
-          Serial.println(menuOption);
+        // Перевірка стану кнопки
+        if ((millis() - lastDebounceTime) > debounceDelay) {
+            if (reading != buttonState) {
+                buttonState = reading;
+                if (buttonState == LOW) {
+                    inSubMenu = true;
+                    Serial.print("Button pressed. Entering subMenu: ");
+                    Serial.println(menuOption);
+                }
+            }
         }
-      }
-    }
-    lastButtonState = reading;
+        lastButtonState = reading;
 
-    // Відображення меню
-    u8g2.clearBuffer(); // Очищення буфера дисплея
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
+        // Відображення меню
+        u8g2.clearBuffer(); // Очищення буфера дисплея
+        u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
 
-    u8g2.setCursor(10, 20);
-    if (menuOption == 0) {
-      u8g2.print("> Кімната");
+        u8g2.setCursor(10, 20);
+        if (menuOption == 0) {
+            u8g2.print("> Кімната");
+        } else {
+            u8g2.print("  Кімната");
+        }
+
+        u8g2.setCursor(10, 40);
+        if (menuOption == 1) {
+            u8g2.print("> Вулиця");
+        } else {
+            u8g2.print("  Вулиця");
+        }
+
+        u8g2.setCursor(10, 60);
+        if (menuOption == 2) {
+            u8g2.print("> Секундомір");
+        } else {
+            u8g2.print("  Секундомір");
+        }
+
+        u8g2.sendBuffer(); // Відправка буфера на дисплей
     } else {
-      u8g2.print("  Кімната");
-    }
+        // Відображення підменю
+        u8g2.clearBuffer(); // Очищення буфера дисплея
+        u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
 
-    u8g2.setCursor(10, 40);
-    if (menuOption == 1) {
-      u8g2.print("> Вулиця");
-    } else {
-      u8g2.print("  Вулиця");
-    }
-
-    u8g2.setCursor(10, 60);
-    if (menuOption == 2) {
-      u8g2.print("> Секундомір");
-    } else {
-      u8g2.print("  Секундомір");
-    }
-
-    u8g2.sendBuffer(); // Відправка буфера на дисплей
-  } else {
-    // Відображення підменю
-    u8g2.clearBuffer(); // Очищення буфера дисплея
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
-
-    if (menuOption == 0) {
-      showTemperatureAndHumidity();
-    } else if (menuOption == 1) {
-      u8g2.setCursor(10, 20);
-      u8g2.print("Submenu Option 2");
-      u8g2.setCursor(10, 40);
-      u8g2.print("Press to return");
-      u8g2.sendBuffer();
-    } else if (menuOption == 2) {
-      u8g2.setCursor(10, 20);
-      u8g2.print("Submenu Option 3");
-      u8g2.setCursor(10, 40);
-      u8g2.print("Press to return");
-      u8g2.sendBuffer();
-    }
-
-    // Зчитування стану кнопки для повернення
-    int reading = digitalRead(BUTTON_PIN);
-    if (reading != lastButtonState) {
-      lastDebounceTime = millis();
-    }
-
-    // Перевірка стану кнопки для повернення
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-      if (reading != buttonState) {
-        buttonState = reading;
-        if (buttonState == LOW) {
-          inSubMenu = false;
-          Serial.println("Button pressed. Returning to main menu.");
+        if (menuOption == 0) {
+            showTemperatureAndHumidity();
+        } else if (menuOption == 1) {
+            u8g2.setCursor(10, 20);
+            u8g2.print("Submenu Option 2");
+            u8g2.setCursor(10, 40);
+            u8g2.print("Press to return");
+            u8g2.sendBuffer();
+        } else if (menuOption == 2) {
+            u8g2.setCursor(10, 20);
+            u8g2.print("Submenu Option 3");
+            u8g2.setCursor(10, 40);
+            u8g2.print("Press to return");
+            u8g2.sendBuffer();
         }
-      }
+
+        // Зчитування стану кнопки для повернення
+        int reading = digitalRead(BUTTON_PIN);
+        if (reading != lastButtonState) {
+            lastDebounceTime = millis();
+        }
+
+        // Перевірка стану кнопки для повернення
+        if ((millis() - lastDebounceTime) > debounceDelay) {
+            if (reading != buttonState) {
+                buttonState = reading;
+                if (buttonState == LOW) {
+                    inSubMenu = false;
+                    Serial.println("Button pressed. Returning to main menu.");
+                }
+            }
+        }
+        lastButtonState = reading;
     }
-    lastButtonState = reading;
-  }
 }
 
 void showTemperatureAndHumidity() {
@@ -176,15 +189,12 @@ void showTemperatureAndHumidity() {
     u8g2.printf("Кімната: %.2f C", temperature);
     u8g2.setCursor(0, 30);
     u8g2.printf("Волога: %.2f %%", humidity);
-    u8g2.setCursor(0, 45);
-    u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
     u8g2.sendBuffer();
 
     // Only send data to the mesh and update serial monitor if there's a significant change
     if (abs(temperature - lastTemperature) >= 0.1 || abs(humidity - lastHumidity) >= 1.0) {
         Serial.printf("Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity);
-        Serial.printf("Current Date and Time: %s %02d:%02d:%02d\n", currentDate.c_str(), currentHour, currentMinute, currentSecond);
-        sendTemperatureAndHumidityData(temperature, humidity);
+        sendTemperatureAndHumidityData(temperature, humidity); // Send temperature and humidity data
         lastTemperature = temperature;
         lastHumidity = humidity;
     }
@@ -197,4 +207,10 @@ void sendTemperatureAndHumidityData(float temperature, float humidity) {
     mesh.sendBroadcast(tempMsg);
     mesh.sendBroadcast(humiMsg);
     Serial.printf("Sent to mesh: Temperature: %.2f °C, Humidity: %.2f %%\n", temperature, humidity); // Debugging output
+}
+
+void showImage() {
+    u8g2.clearBuffer();
+    u8g2.drawBitmap(0, 0, 16, 128, image);
+    u8g2.sendBuffer();
 }
