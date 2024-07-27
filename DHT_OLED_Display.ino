@@ -48,14 +48,18 @@ int lastPrintedSecond = -1;
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
+    Serial.begin(115200); // Ініціалізація Serial для діагностики
+
     u8g2.begin(); // Ініціалізація дисплея
+    u8g2.clearBuffer(); // Очищення буфера дисплея
+    u8g2.sendBuffer(); // Відправка пустого буфера на дисплей
+
     dht.begin();  // Ініціалізація датчика DHT
     if (!bmp.begin()) {
         Serial.print("Не вдалося знайти датчик BMP085.");
         while (1);
     }
-    Serial.begin(115200); // Ініціалізація Serial для діагностики
-    
+
     // Ініціалізація мережі
     mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);  // Встановлення типів повідомлень
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
@@ -68,6 +72,7 @@ void setup() {
     isWelcomeScreenVisible = true;
 }
 
+
 void loop() {
     mesh.update();  // Оновлення стану мережі
 
@@ -78,6 +83,9 @@ void loop() {
             return; // Повернення для продовження показу привітання
         }
     }
+
+    // Очищення буфера перед відображенням меню
+    u8g2.clearBuffer();
 
     // Зчитування значення джойстика по осі Y
     int joystickY = analogRead(JOYSTICK_Y_PIN);
@@ -128,25 +136,7 @@ void loop() {
         lastButtonState = reading;
 
         // Відображення меню
-        u8g2.clearBuffer(); // Очищення буфера дисплея
-        u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
-
-        for (int i = 0; i < 3; i++) {
-            int y = 20 + i * 20;
-            u8g2.setCursor(10, y);
-            if (menuOption == i) {
-                u8g2.drawFrame(0, y - 10, 128, 15); // Додаємо рамку навколо активного елемента
-                u8g2.print("> ");
-            } else {
-                u8g2.print("  ");
-            }
-
-            if (i == 0) u8g2.print("Кімната");
-            else if (i == 1) u8g2.print("Вулиця");
-            else if (i == 2) u8g2.print("Секундомір");
-        }
-
-        u8g2.sendBuffer(); // Відправка буфера на дисплей
+        showMenu();
     } else {
         // Відображення підменю
         u8g2.clearBuffer(); // Очищення буфера дисплея
@@ -184,6 +174,8 @@ void loop() {
                             stopwatchRunning = true; // Запуск секундоміра
                             Serial.println("Stopwatch started.");
                         }
+                        // Скидання прапорця підменю та повернення до головного меню
+                        inSubMenu = false;
                     } else {
                         inSubMenu = false; // Повернення до головного меню
                         Serial.println("Button pressed. Returning to main menu.");
@@ -200,7 +192,6 @@ void loop() {
         lastDebounceTime = millis();
     }
 }
-
 
 
 void showTemperatureAndHumidity() {
@@ -220,10 +211,8 @@ void showTemperatureAndHumidity() {
     u8g2.printf("Волога: %.2f %%", humidity);
     u8g2.setCursor(0, 45);
     u8g2.printf("Тиск: %.2f hPa", pressure);
-    // Видалено: u8g2.drawFrame(0, 10, 128, 50); // Рамка навколо блоку
     u8g2.sendBuffer();
 }
-
 
 void sendTemperatureAndHumidityData(float temperature, float humidity, float pressure) {
     char tempMsg[20], humiMsg[20], pressureMsg[20];
@@ -235,6 +224,7 @@ void sendTemperatureAndHumidityData(float temperature, float humidity, float pre
     mesh.sendBroadcast(pressureMsg);
     Serial.printf("Sent to mesh: Temperature: %.2f °C, Humidity: %.2f %%, Pressure: %.2f hPa\n", temperature, humidity, pressure); // Debugging output
 }
+
 
 void readAndDisplayPressure() {
     sensors_event_t event;
@@ -267,8 +257,6 @@ void showStopwatch() {
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
     u8g2.setCursor(0, 15);
     u8g2.printf("Секундомір: %02d:%02d", minutes, seconds);
-    // Видалено рамку для секундоміра
-    // u8g2.drawFrame(0, 10, 128, 15); // Видалено
     u8g2.sendBuffer();
 
     // Оновлення Serial монітора, якщо інтервал пройшов
@@ -289,17 +277,58 @@ void showStopwatch() {
         if (reading != buttonState) {
             buttonState = reading;
             if (buttonState == LOW) {
-                inSubMenu = false; // Повернення до головного меню
-                Serial.println("Button pressed. Returning to main menu.");
+                if (menuOption == 2 && inSubMenu) {
+                    if (stopwatchRunning) {
+                        stopwatchRunning = false;
+                        Serial.println("Stopwatch stopped.");
+                    } else {
+                        stopwatchStartTime = millis(); // Скидання таймера
+                        stopwatchRunning = true; // Запуск секундоміра
+                        Serial.println("Stopwatch started.");
+                    }
+                    // Скидання прапорця підменю та повернення до головного меню
+                    inSubMenu = false;
+                } else {
+                    inSubMenu = false; // Повернення до головного меню
+                    Serial.println("Button pressed. Returning to main menu.");
+                }
             }
         }
     }
     lastButtonState = reading;
 }
 
-
 void showImage() {
-    u8g2.clearBuffer();
+    u8g2.clearBuffer(); // Очищення буфера дисплея
     u8g2.drawBitmap(0, 0, 16, 128, image);
     u8g2.sendBuffer();
+}
+
+void showMenu() {
+    u8g2.clearBuffer(); // Очищення буфера дисплея
+    u8g2.enableUTF8Print(); // Включення підтримки UTF-8
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
+
+    for (int i = 0; i < 3; i++) {
+        int y = 20 + i * 20;
+        u8g2.setCursor(10, y);
+        
+        // Отримати ширину тексту
+        int textWidth = u8g2.getStrWidth((i == 0) ? "Кімната" : (i == 1) ? "Вулиця" : "Секундомір");
+        
+        if (menuOption == i) {
+            // Додаємо закруглену рамку навколо тексту
+            u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4); // Малюємо рамку
+            u8g2.print("> ");
+        } else {
+            u8g2.print("  ");
+        }
+
+        // Виведення тексту меню
+        if (i == 0) u8g2.print("Кімната");
+        else if (i == 1) u8g2.print("Вулиця");
+        else if (i == 2) u8g2.print("Секундомір");
+    }
+
+    u8g2.sendBuffer(); // Відправка буфера на дисплей
 }
