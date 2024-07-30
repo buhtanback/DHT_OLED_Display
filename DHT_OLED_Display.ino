@@ -33,9 +33,9 @@ unsigned long debounceDelay = 200;   // Затримка для debounce джо�
 
 bool inSubMenu = false; // Прапорець для відстеження чи ми в підменю
 
-float lastTemperature = 0;
-float lastHumidity = 0;
-float lastPressure = 0;
+float lastSentTemperature = -999.0;
+float lastSentHumidity = -999.0;
+float lastSentPressure = -999.0;
 
 unsigned long welcomeScreenStartTime = 0;
 bool isWelcomeScreenVisible = false;
@@ -217,22 +217,38 @@ void readAndSendData() {
     float humidity = dht.readHumidity();
     sensors_event_t event;
     bmp.getEvent(&event);
-
     float pressure = event.pressure; // Зчитування тиску
 
-    sendTemperatureAndHumidityData(temperature, humidity, pressure);
+    // Перевірка змін
+    bool sendTemperature = (temperature != lastSentTemperature);
+    bool sendHumidity = (humidity != lastSentHumidity);
+    bool sendPressure = (pressure != lastSentPressure);
+
+    if (sendTemperature || sendHumidity || sendPressure) {
+        if (sendTemperature) {
+            sendTemperatureAndHumidityData("05", temperature);
+            lastSentTemperature = temperature;
+        }
+        if (sendHumidity) {
+            sendTemperatureAndHumidityData("06", humidity);
+            lastSentHumidity = humidity;
+        }
+        if (sendPressure) {
+            sendTemperatureAndHumidityData("07", pressure);
+            lastSentPressure = pressure;
+        }
+    }
 }
 
-void sendTemperatureAndHumidityData(float temperature, float humidity, float pressure) {
-    char tempMsg[20], humiMsg[20], pressureMsg[20];
-    sprintf(tempMsg, "05%.2f", temperature);
-    sprintf(humiMsg, "06%.2f", humidity);
-    sprintf(pressureMsg, "07%.2f", pressure);
-    mesh.sendBroadcast(tempMsg);
-    mesh.sendBroadcast(humiMsg);
-    mesh.sendBroadcast(pressureMsg);
-    Serial.printf("Sent to mesh: Temperature: %.2f °C, Humidity: %.2f %%, Pressure: %.2f hPa\n", temperature, humidity, pressure); // Debugging output
+
+void sendTemperatureAndHumidityData(String type, float value) {
+    char msg[20];
+    sprintf(msg, "%s%.2f", type.c_str(), value);
+    mesh.sendBroadcast(msg);
+    Serial.printf("Sent to mesh: %s: %.2f\n", type.c_str(), value); // Debugging output
 }
+
+
 
 void showStopwatch() {
     unsigned long elapsed = millis() - stopwatchStartTime;
