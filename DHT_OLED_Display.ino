@@ -72,7 +72,6 @@ void setup() {
     isWelcomeScreenVisible = true;
 }
 
-
 void loop() {
     mesh.update();  // Оновлення стану мережі
 
@@ -186,13 +185,12 @@ void loop() {
         lastButtonState = reading;
     }
 
-    // Періодичне зчитування тиску
-    if (millis() - lastDebounceTime > 1000) { // Зчитувати тиск кожну секунду
-        readAndDisplayPressure();
-        lastDebounceTime = millis();
+    // Періодичне зчитування даних і відправка в mesh-мережу
+    if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
+        readAndSendData();
+        lastSerialUpdateTime = millis();
     }
 }
-
 
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
@@ -214,6 +212,17 @@ void showTemperatureAndHumidity() {
     u8g2.sendBuffer();
 }
 
+void readAndSendData() {
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+    sensors_event_t event;
+    bmp.getEvent(&event);
+
+    float pressure = event.pressure; // Зчитування тиску
+
+    sendTemperatureAndHumidityData(temperature, humidity, pressure);
+}
+
 void sendTemperatureAndHumidityData(float temperature, float humidity, float pressure) {
     char tempMsg[20], humiMsg[20], pressureMsg[20];
     sprintf(tempMsg, "05%.2f", temperature);
@@ -223,29 +232,6 @@ void sendTemperatureAndHumidityData(float temperature, float humidity, float pre
     mesh.sendBroadcast(humiMsg);
     mesh.sendBroadcast(pressureMsg);
     Serial.printf("Sent to mesh: Temperature: %.2f °C, Humidity: %.2f %%, Pressure: %.2f hPa\n", temperature, humidity, pressure); // Debugging output
-}
-
-
-void readAndDisplayPressure() {
-    sensors_event_t event;
-    bmp.getEvent(&event);
-
-    if (event.pressure) {
-        // Виведення тиску
-        Serial.print("Тиск: ");
-        Serial.print(event.pressure);
-        Serial.println(" hPa");
-        
-        // Відправка даних тиску в mesh-мережу
-        sendPressureData(event.pressure);
-    }
-}
-
-void sendPressureData(float pressure) {
-    char pressureMsg[20];
-    sprintf(pressureMsg, "07%.2f", pressure);
-    mesh.sendBroadcast(pressureMsg);
-    Serial.printf("Sent to mesh: Pressure: %.2f hPa\n", pressure); // Debugging output
 }
 
 void showStopwatch() {
