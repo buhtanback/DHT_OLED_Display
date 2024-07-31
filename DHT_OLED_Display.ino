@@ -5,6 +5,10 @@
 #include "painlessMesh.h"
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085_U.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
 
 #define MESH_PREFIX "buhtan"
 #define MESH_PASSWORD "buhtan123"
@@ -46,6 +50,24 @@ unsigned long lastSerialUpdateTime = 0;
 unsigned long serialUpdateInterval = 1000;
 int lastPrintedSecond = -1;
 
+
+
+String currentDate;
+String currentTime;
+int currentHour, currentMinute, currentSecond;
+unsigned long lastMillis;
+
+String weatherDescription;
+float weatherTemp;
+
+unsigned long previousMillis = 0;
+const long interval = 10000;  // Інтервал оновлення погоди (10 секунд)
+unsigned long lastTimeUpdateMillis = 0;
+const long timeInterval = 1000; // Інтервал оновлення часу (1 секунда)
+
+
+
+
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
     Serial.begin(115200); // Ініціалізація Serial для діагностики
@@ -67,10 +89,15 @@ void setup() {
         Serial.printf("Received from %u msg=%s\n", from, msg.c_str());
     });
 
+    connectToWiFi(); // Підключення до WiFi
     showImage(); // Показати картинку привітання при запуску
     welcomeScreenStartTime = millis();
     isWelcomeScreenVisible = true;
+
+    // Ініціалізація змінної для часу
+    lastMillis = millis();
 }
+
 
 void loop() {
     mesh.update();  // Оновлення стану мережі
@@ -88,7 +115,7 @@ void loop() {
 
     // Зчитування значення джойстика по осі Y
     int joystickY = analogRead(JOYSTICK_Y_PIN);
-  
+
     if (!inSubMenu) {
         // Перевірка, чи джойстик був переміщений
         if (millis() - lastDebounceTime > debounceDelay) {
@@ -144,11 +171,7 @@ void loop() {
         if (menuOption == 0) {
             showTemperatureAndHumidity();
         } else if (menuOption == 1) {
-            u8g2.setCursor(10, 20);
-            u8g2.print("Submenu Option 2");
-            u8g2.setCursor(10, 40);
-            u8g2.print("Press to return");
-            u8g2.sendBuffer();
+            showWeather();
         } else if (menuOption == 2) {
             showStopwatch();
         }
@@ -164,21 +187,8 @@ void loop() {
             if (reading != buttonState) {
                 buttonState = reading;
                 if (buttonState == LOW) {
-                    if (menuOption == 2 && inSubMenu) {
-                        if (stopwatchRunning) {
-                            stopwatchRunning = false;
-                            Serial.println("Stopwatch stopped.");
-                        } else {
-                            stopwatchStartTime = millis(); // Скидання таймера
-                            stopwatchRunning = true; // Запуск секундоміра
-                            Serial.println("Stopwatch started.");
-                        }
-                        // Скидання прапорця підменю та повернення до головного меню
-                        inSubMenu = false;
-                    } else {
-                        inSubMenu = false; // Повернення до головного меню
-                        Serial.println("Button pressed. Returning to main menu.");
-                    }
+                    inSubMenu = false; // Повернення до головного меню
+                    Serial.println("Button pressed. Returning to main menu.");
                 }
             }
         }
@@ -191,6 +201,7 @@ void loop() {
         lastSerialUpdateTime = millis();
     }
 }
+
 
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
@@ -245,9 +256,8 @@ void sendTemperatureAndHumidityData(String type, float value) {
     char msg[20];
     sprintf(msg, "%s%.2f", type.c_str(), value);
     mesh.sendBroadcast(msg);
-    Serial.printf("Sent to mesh: %s: %.2f\n", type.c_str(), value); // Debugging output
+    Serial.printf("Sent to mesh: %s%.2f\n", type.c_str(), value); // Видалено пробіл після двокрапки
 }
-
 
 
 void showStopwatch() {
@@ -333,4 +343,151 @@ void showMenu() {
     }
 
     u8g2.sendBuffer(); // Відправка буфера на дисплей
+}
+
+
+void connectToWiFi() {
+    Serial.println("Attempting to connect to WiFi...");
+    WiFi.begin(ssid, password);
+    int attempt = 0;
+    unsigned long startAttemptTime = millis();
+    while (WiFi.status() != WL_CONNECTED && attempt < 30) { // Максимум 30 спроб
+        if (millis() - startAttemptTime >= 1000) {
+            Serial.print(".");
+            startAttemptTime = millis();
+            attempt++;
+        }
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to WiFi");
+    } else {
+        Serial.println("Failed to connect to WiFi");
+    }
+}
+
+void updateTime() {
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Attempting to update time...");
+        HTTPClient http;
+        http.begin("http://worldtimeapi.org/api/timezone/Europe/Kiev");
+        int httpCode = http.GET();
+
+        if (httpCode > 0) {
+            String payload = http.getString();
+            Serial.println("Payload: " + payload);  // Додано для налагодження
+            DynamicJsonDocument doc(1024);
+            deserializeJson(doc, payload);
+            String dateTime = doc["datetime"];
+            currentDate = dateTime.substring(2, 4) + "-" + dateTime.substring(5, 7) + "-" + dateTime.substring(8, 10); // Витягнути дату в потрібному форматі
+            currentTime = dateTime.substring(11, 19); // Витягнути час з datetime
+            currentHour = currentTime.substring(0, 2).toInt();
+            currentMinute = currentTime.substring(3, 5).toInt();
+            currentSecond = currentTime.substring(6, 8).toInt();
+            lastMillis = millis();
+            Serial.println("Time updated: " + currentTime);
+            Serial.println("Date updated: " + currentDate);
+        } else {
+            Serial.println("HTTP GET failed: " + String(httpCode));
+        }
+        http.end();
+    } else {
+        Serial.println("Not connected to WiFi");
+    }
+}
+
+void updateCurrentTime() {
+    currentSecond++;
+    if (currentSecond >= 60) {
+        currentSecond = 0;
+        currentMinute++;
+        if (currentMinute >= 60) {
+            currentMinute = 0;
+            currentHour++;
+            if (currentHour >= 24) {
+                currentHour = 0;
+            }
+        }
+    }
+}
+
+void updateWeather() {
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Attempting to update weather...");
+        HTTPClient http;
+        http.begin("http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&lang=ua&appid=89b5c4878e84804573dae7a6c3628e94&units=metric");
+        int httpCode = http.GET();
+
+        if (httpCode > 0) {
+            String payload = http.getString();
+            Serial.println("Weather Payload: " + payload);  // Додано для налагодження
+            DynamicJsonDocument doc(2048);
+            deserializeJson(doc, payload);
+            weatherDescription = doc["weather"][0]["description"].as<String>();
+            weatherTemp = doc["main"]["temp"];
+            Serial.printf("Weather updated: %s, %.2f °C\n", weatherDescription.c_str(), weatherTemp);
+        } else {
+            Serial.println("HTTP GET failed: " + String(httpCode));
+        }
+        http.end();
+    } else {
+        Serial.println("Not connected to WiFi");
+    }
+}
+
+void checkButton() {
+    int reading = digitalRead(BUTTON_PIN);
+    if (reading != lastButtonState) {
+        lastDebounceTime = millis();
+    }
+
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+        if (reading != buttonState) {
+            buttonState = reading;
+            if (buttonState == LOW) {
+                // Повернення до головного меню
+                inSubMenu = false;
+                Serial.println("Button pressed. Returning to main menu.");
+            }
+        }
+    }
+    lastButtonState = reading;
+}
+
+void showWeather() {
+    // Відключення від mesh-мережі
+    mesh.stop();
+
+    // Підключення до Wi-Fi
+    connectToWiFi();
+
+    // Оновлення погоди
+    updateWeather();
+
+    // Оновлення часу
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastMillis >= timeInterval) {
+        lastMillis = currentMillis;
+        updateCurrentTime(); // Оновлення часу
+    }
+
+    // Показ інформації
+    u8g2.clearBuffer();
+    u8g2.enableUTF8Print();
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+    u8g2.setCursor(0, 15);
+    u8g2.printf(" %s", weatherDescription.c_str());
+    u8g2.setCursor(0, 30);
+    u8g2.printf("Вулиця: %.2f C", weatherTemp);
+    u8g2.setCursor(0, 45);
+    u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
+    u8g2.sendBuffer();
+
+    // Перевірка стану кнопки для повернення
+    checkButton();
+
+    // Відключення від Wi-Fi
+    WiFi.disconnect();
+
+    // Повернення до mesh-мережі
+    mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
 }
