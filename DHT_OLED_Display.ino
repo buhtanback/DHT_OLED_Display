@@ -8,6 +8,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 #define MESH_PREFIX "buhtan"
 #define MESH_PASSWORD "buhtan123"
@@ -49,18 +51,16 @@ unsigned long lastSerialUpdateTime = 0;
 unsigned long serialUpdateInterval = 1000;
 int lastPrintedSecond = -1;
 
-String currentDate;
-String currentTime;
-int currentHour, currentMinute, currentSecond;
-unsigned long lastMillis;
-
 String weatherDescription;
 float weatherTemp;
 
 unsigned long previousMillis = 0;
 const long interval = 10000;  // Інтервал оновлення погоди (10 секунд)
-unsigned long lastTimeUpdateMillis = 0;
-const long timeInterval = 1000; // Інтервал оновлення часу (1 секунда)
+
+// NTP Client
+WiFiUDP ntpUDP;
+const long utcOffsetInSeconds = 10800; // UTC+3 для Києва (перевірте поточний час)
+NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
@@ -83,13 +83,9 @@ void setup() {
         Serial.printf("Received from %u msg=%s\n", from, msg.c_str());
     });
 
-    connectToWiFi(); // Підключення до WiFi
     showImage(); // Показати картинку привітання при запуску
     welcomeScreenStartTime = millis();
     isWelcomeScreenVisible = true;
-
-    // Ініціалізація змінної для часу
-    lastMillis = millis();
 }
 
 void loop() {
@@ -275,10 +271,10 @@ void showMenu() {
     for (int i = 0; i < 3; i++) {
         int y = 20 + i * 20;
         u8g2.setCursor(10, y);
-        
+
         // Отримати ширину тексту
         int textWidth = u8g2.getStrWidth((i == 0) ? "Кімната" : (i == 1) ? "Вулиця" : "Секундомір");
-        
+
         if (menuOption == i) {
             // Додаємо закруглену рамку навколо тексту
             u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4); // Малюємо рамку
@@ -315,51 +311,6 @@ void connectToWiFi() {
     }
 }
 
-void updateTime() {
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("Attempting to update time...");
-        HTTPClient http;
-        http.begin("http://worldtimeapi.org/api/timezone/Europe/Kiev");
-        int httpCode = http.GET();
-
-        if (httpCode > 0) {
-            String payload = http.getString();
-            Serial.println("Payload: " + payload);  // Додано для налагодження
-            DynamicJsonDocument doc(1024);
-            deserializeJson(doc, payload);
-            String dateTime = doc["datetime"];
-            currentDate = dateTime.substring(2, 4) + "-" + dateTime.substring(5, 7) + "-" + dateTime.substring(8, 10); // Витягнути дату в потрібному форматі
-            currentTime = dateTime.substring(11, 19); // Витягнути час з datetime
-            currentHour = currentTime.substring(0, 2).toInt();
-            currentMinute = currentTime.substring(3, 5).toInt();
-            currentSecond = currentTime.substring(6, 8).toInt();
-            lastMillis = millis();
-            Serial.println("Time updated: " + currentTime);
-            Serial.println("Date updated: " + currentDate);
-        } else {
-            Serial.println("HTTP GET failed: " + String(httpCode));
-        }
-        http.end();
-    } else {
-        Serial.println("Not connected to WiFi");
-    }
-}
-
-void updateCurrentTime() {
-    currentSecond++;
-    if (currentSecond >= 60) {
-        currentSecond = 0;
-        currentMinute++;
-        if (currentMinute >= 60) {
-            currentMinute = 0;
-            currentHour++;
-            if (currentHour >= 24) {
-                currentHour = 0;
-            }
-        }
-    }
-}
-
 void updateWeather() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println("Attempting to update weather...");
@@ -391,39 +342,61 @@ void showWeather() {
     // Підключення до Wi-Fi
     connectToWiFi();
 
+    // Ініціалізація NTP клієнта
+    timeClient.begin();
+
     // Оновлення погоди
     updateWeather();
 
-    // Оновлення часу
-    unsigned long currentMillis = millis();
-    if (currentMillis - lastMillis >= timeInterval) {
-        lastMillis = currentMillis;
-        updateCurrentTime(); // Оновлення часу
+    while (inSubMenu) {
+        // Оновлення часу з NTP
+        timeClient.update();
+
+        // Отримання часу
+        int currentHour = timeClient.getHours();
+        int currentMinute = timeClient.getMinutes();
+        int currentSecond = timeClient.getSeconds();
+
+        // Отримання дати (день, місяць, рік)
+        unsigned long epochTime = timeClient.getEpochTime();
+        struct tm *ptm = gmtime ((time_t *)&epochTime);
+        int currentDay = ptm->tm_mday;
+        int currentMonth = ptm->tm_mon + 1;
+        int currentYear = ptm->tm_year + 1900;
+
+        // Формування рядка дати
+        char dateString[11];
+        sprintf(dateString, "%02d-%02d-%04d", currentDay, currentMonth, currentYear);
+
+        // Показ інформації
+        u8g2.clearBuffer();
+        u8g2.enableUTF8Print();
+        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+        u8g2.setCursor(0, 15);
+        u8g2.printf(" %s", weatherDescription.c_str());
+        u8g2.setCursor(0, 30);
+        u8g2.printf("Вулиця: %.2f C", weatherTemp);
+        u8g2.setCursor(0, 45);
+        u8g2.printf("%s %02d:%02d:%02d", dateString, currentHour, currentMinute, currentSecond);
+        u8g2.sendBuffer();
+
+        // Перевірка кнопки для повернення
+        if (handleReturnButton()) {
+            inSubMenu = false;
+            Serial.println("Button pressed. Returning to main menu.");
+
+            // Відключення від Wi-Fi
+            WiFi.disconnect();
+
+            // Повернення до mesh-мережі
+            mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
+
+            // Зупинка NTP клієнта
+            timeClient.end();
+        }
+
+        delay(1000); // Затримка для оновлення раз в секунду
     }
-
-    // Показ інформації
-    u8g2.clearBuffer();
-    u8g2.enableUTF8Print();
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-    u8g2.setCursor(0, 15);
-    u8g2.printf(" %s", weatherDescription.c_str());
-    u8g2.setCursor(0, 30);
-    u8g2.printf("Вулиця: %.2f C", weatherTemp);
-    u8g2.setCursor(0, 45);
-    u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
-    u8g2.sendBuffer();
-
-    // Перевірка кнопки для повернення
-    if (handleReturnButton()) {
-        inSubMenu = false;
-        Serial.println("Button pressed. Returning to main menu.");
-    }
-
-    // Відключення від Wi-Fi
-    WiFi.disconnect();
-
-    // Повернення до mesh-мережі
-    mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
 }
 
 bool handleReturnButton() {
