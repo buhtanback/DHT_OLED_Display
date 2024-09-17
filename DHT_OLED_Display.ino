@@ -33,8 +33,10 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 int menuOption = 0;
 int buttonState = 0;
 int lastButtonState = 0;
-unsigned long lastDebounceTime = 0;  // Час останнього зміни стану джойстика
-unsigned long debounceDelay = 200;   // Затримка для debounce джойстика
+unsigned long lastButtonDebounceTime = 0;   // Час останнього зміни стану кнопки
+unsigned long lastJoystickDebounceTime = 0; // Час останнього зміни стану джойстика
+unsigned long buttonDebounceDelay = 50;     // Затримка debounce для кнопки
+unsigned long joystickDebounceDelay = 300;  // Затримка debounce для джойстика (збільшена)
 
 bool inSubMenu = false; // Прапорець для відстеження чи ми в підменю
 
@@ -59,7 +61,7 @@ const long interval = 10000;  // Інтервал оновлення погод�
 
 // NTP Client
 WiFiUDP ntpUDP;
-const long utcOffsetInSeconds = 10800; // UTC+3 для Києва (перевірте поточний час)
+const long utcOffsetInSeconds = 10800; // UTC+3 для Києва
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 void setup() {
@@ -107,13 +109,13 @@ void loop() {
 
     if (!inSubMenu) {
         // Перевірка, чи джойстик був переміщений
-        if (millis() - lastDebounceTime > debounceDelay) {
+        if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
             if (joystickY < 1000) { // Вгору
                 menuOption--;
                 if (menuOption < 0) {
                     menuOption = 2;
                 }
-                lastDebounceTime = millis();
+                lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved up. New menuOption: ");
                 Serial.println(menuOption);
             } else if (joystickY > 3000) { // Вниз
@@ -121,7 +123,7 @@ void loop() {
                 if (menuOption > 2) {
                     menuOption = 0;
                 }
-                lastDebounceTime = millis();
+                lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved down. New menuOption: ");
                 Serial.println(menuOption);
             }
@@ -130,11 +132,11 @@ void loop() {
         // Зчитування стану кнопки
         int reading = digitalRead(BUTTON_PIN);
         if (reading != lastButtonState) {
-            lastDebounceTime = millis();
+            lastButtonDebounceTime = millis();
         }
 
         // Перевірка стану кнопки
-        if ((millis() - lastDebounceTime) > debounceDelay) {
+        if ((millis() - lastButtonDebounceTime) > buttonDebounceDelay) {
             if (reading != buttonState) {
                 buttonState = reading;
                 if (buttonState == LOW) {
@@ -362,11 +364,11 @@ void showWeather() {
         struct tm *ptm = gmtime ((time_t *)&epochTime);
         int currentDay = ptm->tm_mday;
         int currentMonth = ptm->tm_mon + 1;
-        int currentYear = ptm->tm_year + 1900;
+        int currentYear = (ptm->tm_year + 1900) % 100; // Останні дві цифри року
 
-        // Формування рядка дати
-        char dateString[11];
-        sprintf(dateString, "%02d-%02d-%04d", currentDay, currentMonth, currentYear);
+        // Формування рядка дати у форматі 31.5.24
+        char dateString[9];
+        sprintf(dateString, "%d.%d.%02d", currentDay, currentMonth, currentYear);
 
         // Показ інформації
         u8g2.clearBuffer();
@@ -395,23 +397,22 @@ void showWeather() {
             timeClient.end();
         }
 
-        delay(1000); // Затримка для оновлення раз в секунду
+        delay(500); // Затримка для оновлення двічі на секунду
     }
 }
 
 bool handleReturnButton() {
     int reading = digitalRead(BUTTON_PIN);
     if (reading != lastButtonState) {
-        lastDebounceTime = millis();
+        lastButtonDebounceTime = millis();
     }
 
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-        if (reading != buttonState) {
-            buttonState = reading;
-            if (buttonState == LOW) {
-                lastButtonState = reading;
-                return true; // Потрібно вийти з підменю
-            }
+    // Видалено затримку debounce для швидкого реагування
+    if (reading != buttonState) {
+        buttonState = reading;
+        if (buttonState == LOW) {
+            lastButtonState = reading;
+            return true; // Потрібно вийти з підменю
         }
     }
     lastButtonState = reading;
