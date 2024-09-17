@@ -9,7 +9,6 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-
 #define MESH_PREFIX "buhtan"
 #define MESH_PASSWORD "buhtan123"
 #define MESH_PORT 5555
@@ -50,8 +49,6 @@ unsigned long lastSerialUpdateTime = 0;
 unsigned long serialUpdateInterval = 1000;
 int lastPrintedSecond = -1;
 
-
-
 String currentDate;
 String currentTime;
 int currentHour, currentMinute, currentSecond;
@@ -64,9 +61,6 @@ unsigned long previousMillis = 0;
 const long interval = 10000;  // Інтервал оновлення погоди (10 секунд)
 unsigned long lastTimeUpdateMillis = 0;
 const long timeInterval = 1000; // Інтервал оновлення часу (1 секунда)
-
-
-
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
@@ -97,7 +91,6 @@ void setup() {
     // Ініціалізація змінної для часу
     lastMillis = millis();
 }
-
 
 void loop() {
     mesh.update();  // Оновлення стану мережі
@@ -165,9 +158,6 @@ void loop() {
         showMenu();
     } else {
         // Відображення підменю
-        u8g2.clearBuffer(); // Очищення буфера дисплея
-        u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
-
         if (menuOption == 0) {
             showTemperatureAndHumidity();
         } else if (menuOption == 1) {
@@ -175,24 +165,6 @@ void loop() {
         } else if (menuOption == 2) {
             showStopwatch();
         }
-
-        // Зчитування стану кнопки для повернення
-        int reading = digitalRead(BUTTON_PIN);
-        if (reading != lastButtonState) {
-            lastDebounceTime = millis();
-        }
-
-        // Перевірка стану кнопки для повернення
-        if ((millis() - lastDebounceTime) > debounceDelay) {
-            if (reading != buttonState) {
-                buttonState = reading;
-                if (buttonState == LOW) {
-                    inSubMenu = false; // Повернення до головного меню
-                    Serial.println("Button pressed. Returning to main menu.");
-                }
-            }
-        }
-        lastButtonState = reading;
     }
 
     // Періодичне зчитування даних і відправка в mesh-мережу
@@ -201,7 +173,6 @@ void loop() {
         lastSerialUpdateTime = millis();
     }
 }
-
 
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
@@ -221,6 +192,12 @@ void showTemperatureAndHumidity() {
     u8g2.setCursor(0, 45);
     u8g2.printf("Тиск: %.2f hPa", pressure);
     u8g2.sendBuffer();
+
+    // Перевірка кнопки для повернення
+    if (handleReturnButton()) {
+        inSubMenu = false;
+        Serial.println("Button pressed. Returning to main menu.");
+    }
 }
 
 void readAndSendData() {
@@ -251,14 +228,12 @@ void readAndSendData() {
     }
 }
 
-
 void sendTemperatureAndHumidityData(String type, float value) {
     char msg[20];
     sprintf(msg, "%s%.2f", type.c_str(), value);
     mesh.sendBroadcast(msg);
-    Serial.printf("Sent to mesh: %s%.2f\n", type.c_str(), value); // Видалено пробіл після двокрапки
+    Serial.printf("Sent to mesh: %s%.2f\n", type.c_str(), value);
 }
-
 
 void showStopwatch() {
     unsigned long elapsed = millis() - stopwatchStartTime;
@@ -278,36 +253,12 @@ void showStopwatch() {
         lastPrintedSecond = seconds;
     }
 
-    // Зчитування стану кнопки для повернення
-    int reading = digitalRead(BUTTON_PIN);
-    if (reading != lastButtonState) {
-        lastDebounceTime = millis();
+    // Перевірка кнопки для повернення
+    if (handleReturnButton()) {
+        inSubMenu = false;
+        stopwatchRunning = false; // Зупинити секундомір при виході
+        Serial.println("Button pressed. Returning to main menu.");
     }
-
-    // Перевірка стану кнопки для повернення
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-        if (reading != buttonState) {
-            buttonState = reading;
-            if (buttonState == LOW) {
-                if (menuOption == 2 && inSubMenu) {
-                    if (stopwatchRunning) {
-                        stopwatchRunning = false;
-                        Serial.println("Stopwatch stopped.");
-                    } else {
-                        stopwatchStartTime = millis(); // Скидання таймера
-                        stopwatchRunning = true; // Запуск секундоміра
-                        Serial.println("Stopwatch started.");
-                    }
-                    // Скидання прапорця підменю та повернення до головного меню
-                    inSubMenu = false;
-                } else {
-                    inSubMenu = false; // Повернення до головного меню
-                    Serial.println("Button pressed. Returning to main menu.");
-                }
-            }
-        }
-    }
-    lastButtonState = reading;
 }
 
 void showImage() {
@@ -344,7 +295,6 @@ void showMenu() {
 
     u8g2.sendBuffer(); // Відправка буфера на дисплей
 }
-
 
 void connectToWiFi() {
     Serial.println("Attempting to connect to WiFi...");
@@ -434,25 +384,6 @@ void updateWeather() {
     }
 }
 
-void checkButton() {
-    int reading = digitalRead(BUTTON_PIN);
-    if (reading != lastButtonState) {
-        lastDebounceTime = millis();
-    }
-
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-        if (reading != buttonState) {
-            buttonState = reading;
-            if (buttonState == LOW) {
-                // Повернення до головного меню
-                inSubMenu = false;
-                Serial.println("Button pressed. Returning to main menu.");
-            }
-        }
-    }
-    lastButtonState = reading;
-}
-
 void showWeather() {
     // Відключення від mesh-мережі
     mesh.stop();
@@ -482,12 +413,34 @@ void showWeather() {
     u8g2.printf("%s %02d:%02d:%02d", currentDate.c_str(), currentHour, currentMinute, currentSecond);
     u8g2.sendBuffer();
 
-    // Перевірка стану кнопки для повернення
-    checkButton();
+    // Перевірка кнопки для повернення
+    if (handleReturnButton()) {
+        inSubMenu = false;
+        Serial.println("Button pressed. Returning to main menu.");
+    }
 
     // Відключення від Wi-Fi
     WiFi.disconnect();
 
     // Повернення до mesh-мережі
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
+}
+
+bool handleReturnButton() {
+    int reading = digitalRead(BUTTON_PIN);
+    if (reading != lastButtonState) {
+        lastDebounceTime = millis();
+    }
+
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+        if (reading != buttonState) {
+            buttonState = reading;
+            if (buttonState == LOW) {
+                lastButtonState = reading;
+                return true; // Потрібно вийти з підменю
+            }
+        }
+    }
+    lastButtonState = reading;
+    return false; // Залишаємося в підменю
 }
