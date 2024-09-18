@@ -17,13 +17,13 @@
 
 painlessMesh mesh;
 
-#define OLED_RESET      -1  // Скидання не використовується для SSD1306 I2C
+#define OLED_RESET      -1  
 #define JOYSTICK_X_PIN  35
 #define JOYSTICK_Y_PIN  34
-#define BUTTON_PIN      5   // Використовуйте той самий пін для вибору і повернення
+#define BUTTON_PIN      5   
 
-#define DHTPIN          4   // Пін, до якого підключений датчик DHT
-#define DHTTYPE         DHT22   // Тип датчика DHT
+#define DHTPIN          4   
+#define DHTTYPE         DHT22   
 
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
@@ -33,12 +33,17 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 int menuOption = 0;
 int buttonState = 0;
 int lastButtonState = 0;
-unsigned long lastButtonDebounceTime = 0;   // Час останнього зміни стану кнопки
-unsigned long lastJoystickDebounceTime = 0; // Час останнього зміни стану джойстика
-unsigned long buttonDebounceDelay = 50;     // Затримка debounce для кнопки
-unsigned long joystickDebounceDelay = 300;  // Затримка debounce для джойстика (збільшена)
+unsigned long lastButtonDebounceTime = 0;
+unsigned long lastJoystickDebounceTime = 0;
+unsigned long buttonDebounceDelay = 50;
+unsigned long joystickDebounceDelay = 300;
 
-bool inSubMenu = false; // Прапорець для відстеження чи ми в підменю
+bool inSubMenu = false;
+bool screensaverMode = false;
+
+int buttonPressCount = 0;
+unsigned long firstButtonPressTime = 0;
+const unsigned long multiClickInterval = 500;
 
 float lastSentTemperature = -999.0;
 float lastSentHumidity = -999.0;
@@ -57,60 +62,63 @@ String weatherDescription;
 float weatherTemp;
 
 unsigned long previousMillis = 0;
-const long interval = 10000;  // Інтервал оновлення погоди (10 секунд)
+const long interval = 10000;
 
-// NTP Client
+unsigned long lastWeatherUpdateTime = 0;
+const unsigned long weatherUpdateInterval = 500; 
+
 WiFiUDP ntpUDP;
-const long utcOffsetInSeconds = 10800; // UTC+3 для Києва
+const long utcOffsetInSeconds = 10800;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 void setup() {
-    pinMode(BUTTON_PIN, INPUT_PULLUP); // Налаштування піну кнопки з pull-up
-    Serial.begin(115200); // Ініціалізація Serial для діагностики
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    Serial.begin(115200);
 
-    u8g2.begin(); // Ініціалізація дисплея
-    u8g2.clearBuffer(); // Очищення буфера дисплея
-    u8g2.sendBuffer(); // Відправка пустого буфера на дисплей
+    u8g2.begin();
+    u8g2.clearBuffer();
+    u8g2.sendBuffer();
 
-    dht.begin();  // Ініціалізація датчика DHT
+    dht.begin();
     if (!bmp.begin()) {
         Serial.print("Не вдалося знайти датчик BMP085.");
         while (1);
     }
 
-    // Ініціалізація мережі
-    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);  // Встановлення типів повідомлень
+    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
     mesh.onReceive([](uint32_t from, String &msg) {
         Serial.printf("Received from %u msg=%s\n", from, msg.c_str());
     });
 
-    showImage(); // Показати картинку привітання при запуску
+    showImage();
     welcomeScreenStartTime = millis();
     isWelcomeScreenVisible = true;
 }
 
 void loop() {
-    mesh.update();  // Оновлення стану мережі
+    mesh.update();
+    handleButtonPress();
+
+    if (screensaverMode) {
+        showImage();
+        return;
+    }
 
     if (isWelcomeScreenVisible) {
-        if (millis() - welcomeScreenStartTime > 3000) { // Показувати картинку привітання протягом 3 секунд
+        if (millis() - welcomeScreenStartTime > 3000) {
             isWelcomeScreenVisible = false;
         } else {
-            return; // Повернення для продовження показу привітання
+            return;
         }
     }
 
-    // Очищення буфера перед відображенням меню
     u8g2.clearBuffer();
-
-    // Зчитування значення джойстика по осі Y
     int joystickY = analogRead(JOYSTICK_Y_PIN);
 
     if (!inSubMenu) {
-        // Перевірка, чи джойстик був переміщений
         if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
-            if (joystickY < 1000) { // Вгору
+            if (joystickY < 1000) {
                 menuOption--;
                 if (menuOption < 0) {
                     menuOption = 2;
@@ -118,7 +126,7 @@ void loop() {
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved up. New menuOption: ");
                 Serial.println(menuOption);
-            } else if (joystickY > 3000) { // Вниз
+            } else if (joystickY > 3000) {
                 menuOption++;
                 if (menuOption > 2) {
                     menuOption = 0;
@@ -129,33 +137,8 @@ void loop() {
             }
         }
 
-        // Зчитування стану кнопки
-        int reading = digitalRead(BUTTON_PIN);
-        if (reading != lastButtonState) {
-            lastButtonDebounceTime = millis();
-        }
-
-        // Перевірка стану кнопки
-        if ((millis() - lastButtonDebounceTime) > buttonDebounceDelay) {
-            if (reading != buttonState) {
-                buttonState = reading;
-                if (buttonState == LOW) {
-                    inSubMenu = true;
-                    if (menuOption == 2) { // Якщо вибрано секундомір
-                        stopwatchStartTime = millis(); // Скидання таймера
-                        stopwatchRunning = true; // Запуск секундоміра
-                    }
-                    Serial.print("Button pressed. Entering subMenu: ");
-                    Serial.println(menuOption);
-                }
-            }
-        }
-        lastButtonState = reading;
-
-        // Відображення меню
         showMenu();
     } else {
-        // Відображення підменю
         if (menuOption == 0) {
             showTemperatureAndHumidity();
         } else if (menuOption == 1) {
@@ -165,10 +148,56 @@ void loop() {
         }
     }
 
-    // Періодичне зчитування даних і відправка в mesh-мережу
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
         readAndSendData();
         lastSerialUpdateTime = millis();
+    }
+}
+
+void handleButtonPress() {
+    int reading = digitalRead(BUTTON_PIN);
+
+    if (reading != lastButtonState) {
+        lastButtonDebounceTime = millis();
+    }
+
+    if ((millis() - lastButtonDebounceTime) > buttonDebounceDelay) {
+        if (reading != buttonState) {
+            buttonState = reading;
+            if (buttonState == LOW) {
+                buttonPressCount++;
+                if (buttonPressCount == 1) {
+                    firstButtonPressTime = millis();
+                }
+            }
+        }
+    }
+
+    lastButtonState = reading;
+
+    if (buttonPressCount > 0 && (millis() - firstButtonPressTime) > multiClickInterval) {
+        if (buttonPressCount == 1) {
+            if (!inSubMenu && !screensaverMode) {
+                inSubMenu = true;
+                if (menuOption == 2) {
+                    stopwatchStartTime = millis();
+                    stopwatchRunning = true;
+                }
+                Serial.print("Button pressed once. Entering subMenu: ");
+                Serial.println(menuOption);
+            }
+        } else if (buttonPressCount == 2 || buttonPressCount == 3) {
+            if (!inSubMenu) {
+                screensaverMode = !screensaverMode;
+                Serial.println("Button pressed 2 or 3 times. Toggling screensaver mode.");
+                if (screensaverMode) {
+                    isWelcomeScreenVisible = true;
+                } else {
+                    isWelcomeScreenVisible = false;
+                }
+            }
+        }
+        buttonPressCount = 0;
     }
 }
 
@@ -177,10 +206,9 @@ void showTemperatureAndHumidity() {
     float humidity = dht.readHumidity();
     sensors_event_t event;
     bmp.getEvent(&event);
+    float pressure = event.pressure;
 
-    float pressure = event.pressure; // Зчитування тиску
-
-    u8g2.clearBuffer(); // Очищення буфера дисплея
+    u8g2.clearBuffer();
     u8g2.enableUTF8Print();
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
     u8g2.setCursor(0, 15);
@@ -191,7 +219,6 @@ void showTemperatureAndHumidity() {
     u8g2.printf("Тиск: %.2f hPa", pressure);
     u8g2.sendBuffer();
 
-    // Перевірка кнопки для повернення
     if (handleReturnButton()) {
         inSubMenu = false;
         Serial.println("Button pressed. Returning to main menu.");
@@ -203,9 +230,8 @@ void readAndSendData() {
     float humidity = dht.readHumidity();
     sensors_event_t event;
     bmp.getEvent(&event);
-    float pressure = event.pressure; // Зчитування тиску
+    float pressure = event.pressure;
 
-    // Перевірка змін
     bool sendTemperature = (temperature != lastSentTemperature);
     bool sendHumidity = (humidity != lastSentHumidity);
     bool sendPressure = (pressure != lastSentPressure);
@@ -244,54 +270,49 @@ void showStopwatch() {
     u8g2.printf("Секундомір: %02d:%02d", minutes, seconds);
     u8g2.sendBuffer();
 
-    // Оновлення Serial монітора, якщо інтервал пройшов
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval && seconds != lastPrintedSecond) {
         Serial.printf("Stopwatch time: %02d:%02d\n", minutes, seconds);
         lastSerialUpdateTime = millis();
         lastPrintedSecond = seconds;
     }
 
-    // Перевірка кнопки для повернення
     if (handleReturnButton()) {
         inSubMenu = false;
-        stopwatchRunning = false; // Зупинити секундомір при виході
+        stopwatchRunning = false;
         Serial.println("Button pressed. Returning to main menu.");
     }
 }
 
 void showImage() {
-    u8g2.clearBuffer(); // Очищення буфера дисплея
+    u8g2.clearBuffer();
     u8g2.drawBitmap(0, 0, 16, 128, image);
     u8g2.sendBuffer();
 }
 
 void showMenu() {
-    u8g2.clearBuffer(); // Очищення буфера дисплея
-    u8g2.enableUTF8Print(); // Включення підтримки UTF-8
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic); // Вибір шрифту
+    u8g2.clearBuffer();
+    u8g2.enableUTF8Print();
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
 
     for (int i = 0; i < 3; i++) {
         int y = 20 + i * 20;
         u8g2.setCursor(10, y);
 
-        // Отримати ширину тексту
         int textWidth = u8g2.getStrWidth((i == 0) ? "Кімната" : (i == 1) ? "Вулиця" : "Секундомір");
 
         if (menuOption == i) {
-            // Додаємо закруглену рамку навколо тексту
-            u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4); // Малюємо рамку
+            u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4);
             u8g2.print("> ");
         } else {
             u8g2.print("  ");
         }
 
-        // Виведення тексту меню
         if (i == 0) u8g2.print("Кімната");
         else if (i == 1) u8g2.print("Вулиця");
         else if (i == 2) u8g2.print("Секундомір");
     }
 
-    u8g2.sendBuffer(); // Відправка буфера на дисплей
+    u8g2.sendBuffer();
 }
 
 void connectToWiFi() {
@@ -299,7 +320,7 @@ void connectToWiFi() {
     WiFi.begin(ssid, password);
     int attempt = 0;
     unsigned long startAttemptTime = millis();
-    while (WiFi.status() != WL_CONNECTED && attempt < 30) { // Максимум 30 спроб
+    while (WiFi.status() != WL_CONNECTED && attempt < 30) {
         if (millis() - startAttemptTime >= 1000) {
             Serial.print(".");
             startAttemptTime = millis();
@@ -322,7 +343,7 @@ void updateWeather() {
 
         if (httpCode > 0) {
             String payload = http.getString();
-            Serial.println("Weather Payload: " + payload);  // Додано для налагодження
+            Serial.println("Weather Payload: " + payload);
             DynamicJsonDocument doc(2048);
             deserializeJson(doc, payload);
             weatherDescription = doc["weather"][0]["description"].as<String>();
@@ -338,66 +359,49 @@ void updateWeather() {
 }
 
 void showWeather() {
-    // Відключення від mesh-мережі
     mesh.stop();
-
-    // Підключення до Wi-Fi
     connectToWiFi();
-
-    // Ініціалізація NTP клієнта
     timeClient.begin();
-
-    // Оновлення погоди
     updateWeather();
 
     while (inSubMenu) {
-        // Оновлення часу з NTP
         timeClient.update();
 
-        // Отримання часу
         int currentHour = timeClient.getHours();
         int currentMinute = timeClient.getMinutes();
         int currentSecond = timeClient.getSeconds();
 
-        // Отримання дати (день, місяць, рік)
         unsigned long epochTime = timeClient.getEpochTime();
-        struct tm *ptm = gmtime ((time_t *)&epochTime);
+        struct tm *ptm = gmtime((time_t *)&epochTime);
         int currentDay = ptm->tm_mday;
         int currentMonth = ptm->tm_mon + 1;
-        int currentYear = (ptm->tm_year + 1900) % 100; // Останні дві цифри року
+        int currentYear = (ptm->tm_year + 1900) % 100;
 
-        // Формування рядка дати у форматі 31.5.24
         char dateString[9];
         sprintf(dateString, "%d.%d.%02d", currentDay, currentMonth, currentYear);
 
-        // Показ інформації
-        u8g2.clearBuffer();
-        u8g2.enableUTF8Print();
-        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-        u8g2.setCursor(0, 15);
-        u8g2.printf(" %s", weatherDescription.c_str());
-        u8g2.setCursor(0, 30);
-        u8g2.printf("Вулиця: %.2f C", weatherTemp);
-        u8g2.setCursor(0, 45);
-        u8g2.printf("%s %02d:%02d:%02d", dateString, currentHour, currentMinute, currentSecond);
-        u8g2.sendBuffer();
+        if (millis() - lastWeatherUpdateTime >= weatherUpdateInterval) {
+            lastWeatherUpdateTime = millis();
 
-        // Перевірка кнопки для повернення
+            u8g2.clearBuffer();
+            u8g2.enableUTF8Print();
+            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+            u8g2.setCursor(0, 15);
+            u8g2.printf(" %s", weatherDescription.c_str());
+            u8g2.setCursor(0, 30);
+            u8g2.printf("Вулиця: %.2f C", weatherTemp);
+            u8g2.setCursor(0, 45);
+            u8g2.printf("%s %02d:%02d:%02d", dateString, currentHour, currentMinute, currentSecond);
+            u8g2.sendBuffer();
+        }
+
         if (handleReturnButton()) {
             inSubMenu = false;
             Serial.println("Button pressed. Returning to main menu.");
-
-            // Відключення від Wi-Fi
             WiFi.disconnect();
-
-            // Повернення до mesh-мережі
             mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
-
-            // Зупинка NTP клієнта
             timeClient.end();
         }
-
-        delay(500); // Затримка для оновлення двічі на секунду
     }
 }
 
@@ -407,14 +411,13 @@ bool handleReturnButton() {
         lastButtonDebounceTime = millis();
     }
 
-    // Видалено затримку debounce для швидкого реагування
     if (reading != buttonState) {
         buttonState = reading;
         if (buttonState == LOW) {
             lastButtonState = reading;
-            return true; // Потрібно вийти з підменю
+            return true;
         }
     }
     lastButtonState = reading;
-    return false; // Залишаємося в підменю
+    return false;
 }
