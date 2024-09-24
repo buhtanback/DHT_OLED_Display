@@ -260,26 +260,41 @@ void sendTemperatureAndHumidityData(String type, float value) {
 }
 
 void showStopwatch() {
-    unsigned long elapsed = millis() - stopwatchStartTime;
-    int seconds = (elapsed / 1000) % 60;
-    int minutes = (elapsed / 60000);
+    unsigned long previousMillis = 0;
+    const unsigned long interval = 1000;  // Оновлюємо екран кожну секунду
 
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-    u8g2.setCursor(0, 15);
-    u8g2.printf("Секундомір: %02d:%02d", minutes, seconds);
-    u8g2.sendBuffer();
+    while (inSubMenu) {
+        unsigned long currentMillis = millis();
 
-    if (millis() - lastSerialUpdateTime >= serialUpdateInterval && seconds != lastPrintedSecond) {
-        Serial.printf("Stopwatch time: %02d:%02d\n", minutes, seconds);
-        lastSerialUpdateTime = millis();
-        lastPrintedSecond = seconds;
-    }
+        // Оновлюємо дисплей кожну секунду
+        if (currentMillis - previousMillis >= interval) {
+            previousMillis = currentMillis;
 
-    if (handleReturnButton()) {
-        inSubMenu = false;
-        stopwatchRunning = false;
-        Serial.println("Button pressed. Returning to main menu.");
+            unsigned long elapsed = millis() - stopwatchStartTime;
+            int seconds = (elapsed / 1000) % 60;
+            int minutes = (elapsed / 60000);
+
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+            u8g2.setCursor(0, 15);
+            u8g2.printf("Секундомір: %02d:%02d", minutes, seconds);
+            u8g2.sendBuffer();
+
+            Serial.printf("Stopwatch time: %02d:%02d\n", minutes, seconds);
+        }
+
+        // Оновлення Mesh-сітки для підтримання зв'язку
+        mesh.update();
+
+        // Викликаємо функцію readAndSendData() для постійного надсилання даних із сенсорів
+        readAndSendData();
+
+        // Перевіряємо на натискання кнопки для виходу з підменю
+        if (handleReturnButton()) {
+            inSubMenu = false;
+            stopwatchRunning = false;
+            Serial.println("Button pressed. Returning to main menu.");
+        }
     }
 }
 
@@ -404,6 +419,7 @@ void showWeather() {
         }
     }
 }
+
 
 bool handleReturnButton() {
     int reading = digitalRead(BUTTON_PIN);
