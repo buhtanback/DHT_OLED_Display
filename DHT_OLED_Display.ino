@@ -97,31 +97,42 @@ void setup() {
 }
 
 void loop() {
+    // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
     mesh.update();
+
+    // Обробка натискань кнопок
     handleButtonPress();
 
+    // Перевірка на режим заставки
     if (screensaverMode) {
         showImage();
+        // Навіть у режимі заставки ми хочемо передавати дані в Mesh
+        readAndSendData();  // Надсилаємо дані з датчиків
         return;
     }
 
+    // Перевірка на вітальну заставку
     if (isWelcomeScreenVisible) {
         if (millis() - welcomeScreenStartTime > 3000) {
             isWelcomeScreenVisible = false;
         } else {
+            // Навіть під час відображення вітальної заставки надсилаємо дані
+            readAndSendData();
             return;
         }
     }
 
+    // Зчитування стану джойстика
     u8g2.clearBuffer();
     int joystickY = analogRead(JOYSTICK_Y_PIN);
 
+    // Якщо ми не в підменю, то обробляємо джойстик для вибору пунктів меню
     if (!inSubMenu) {
         if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
             if (joystickY < 1000) {
                 menuOption--;
                 if (menuOption < 0) {
-                    menuOption = 2;
+                    menuOption = 2;  // Повертаємося до останнього пункту, якщо перевищено межі
                 }
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved up. New menuOption: ");
@@ -129,7 +140,7 @@ void loop() {
             } else if (joystickY > 3000) {
                 menuOption++;
                 if (menuOption > 2) {
-                    menuOption = 0;
+                    menuOption = 0;  // Повертаємося до першого пункту, якщо перевищено межі
                 }
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved down. New menuOption: ");
@@ -137,8 +148,10 @@ void loop() {
             }
         }
 
+        // Відображаємо меню
         showMenu();
     } else {
+        // В залежності від обраного пункту меню викликаємо відповідну функцію
         if (menuOption == 0) {
             showTemperatureAndHumidity();
         } else if (menuOption == 1) {
@@ -148,11 +161,13 @@ void loop() {
         }
     }
 
+    // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
-        readAndSendData();
+        readAndSendData();  // Функція, яка збирає дані з датчиків і відправляє їх у Mesh
         lastSerialUpdateTime = millis();
     }
 }
+
 
 void handleButtonPress() {
     int reading = digitalRead(BUTTON_PIN);
