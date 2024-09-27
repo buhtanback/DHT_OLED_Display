@@ -67,6 +67,10 @@ const long interval = 10000;
 unsigned long lastWeatherUpdateTime = 0;
 const unsigned long weatherUpdateInterval = 500; 
 
+unsigned long lastPressureUpdateTime = 0;  // Час останнього оновлення тиску
+const unsigned long pressureUpdateInterval = 60000;  // 
+
+
 WiFiUDP ntpUDP;
 const long utcOffsetInSeconds = 10800;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
@@ -240,38 +244,77 @@ void showTemperatureAndHumidity() {
     }
 }
 
-void readAndSendData() {
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    sensors_event_t event;
-    bmp.getEvent(&event);
-    float pressure = event.pressure;
-
-    bool sendTemperature = (temperature != lastSentTemperature);
-    bool sendHumidity = (humidity != lastSentHumidity);
-    bool sendPressure = (pressure != lastSentPressure);
-
-    if (sendTemperature || sendHumidity || sendPressure) {
-        if (sendTemperature) {
-            sendTemperatureAndHumidityData("05", temperature);
-            lastSentTemperature = temperature;
-        }
-        if (sendHumidity) {
-            sendTemperatureAndHumidityData("06", humidity);
-            lastSentHumidity = humidity;
-        }
-        if (sendPressure) {
-            sendTemperatureAndHumidityData("07", pressure);
-            lastSentPressure = pressure;
-        }
+void sendPressureData(float pressure) {
+    if (pressure != -999) {  // Переконуємося, що тиск отримано коректно
+        // Формуємо і відправляємо повідомлення про тиск через Mesh
+        char msg[30];
+        sprintf(msg, "Pressure: %.2f hPa", pressure);
+        mesh.sendBroadcast(msg);
+        Serial.printf("Sent pressure to mesh: %.2f hPa\n", pressure);
     }
 }
 
-void sendTemperatureAndHumidityData(String type, float value) {
-    char msg[20];
-    sprintf(msg, "%s%.2f", type.c_str(), value);
-    mesh.sendBroadcast(msg);
-    Serial.printf("Sent to mesh: %s%.2f\n", type.c_str(), value);
+void readAndSendData() {
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+
+    // Оновлення тиску лише раз на певний інтервал
+    unsigned long currentMillis = millis();
+    float pressure = -999;  // Значення за замовчуванням, якщо тиск не оновлюється
+
+    // Оновлюємо тиск лише, якщо пройшов встановлений інтервал
+    if (currentMillis - lastPressureUpdateTime >= pressureUpdateInterval) {
+        sensors_event_t event;
+        bmp.getEvent(&event);
+        pressure = event.pressure;
+        lastPressureUpdateTime = currentMillis;  // Оновлюємо час останнього оновлення тиску
+    }
+
+    // Перевіряємо, чи змінились значення температури, вологості або тиску
+    bool sendTemperature = (temperature != lastSentTemperature);
+    bool sendHumidity = (humidity != lastSentHumidity);
+    bool sendPressure = (pressure != lastSentPressure && pressure != -999);  // Перевірка, чи дійсно отримали нове значення тиску
+
+    // Надсилаємо температуру тільки якщо вона змінилась
+    if (sendTemperature) {
+        char tempMsg[20];
+        sprintf(tempMsg, "Temp: %.2f C", temperature);
+        mesh.sendBroadcast(tempMsg);
+        Serial.printf("Sent temperature: %.2f C\n", temperature);
+        lastSentTemperature = temperature;  // Оновлюємо останнє надіслане значення
+    }
+
+    // Надсилаємо вологість тільки якщо вона змінилась
+    if (sendHumidity) {
+        char humMsg[20];
+        sprintf(humMsg, "Humidity: %.2f %%", humidity);
+        mesh.sendBroadcast(humMsg);
+        Serial.printf("Sent humidity: %.2f %%\n", humidity);
+        lastSentHumidity = humidity;  // Оновлюємо останнє надіслане значення
+    }
+
+    // Надсилаємо тиск тільки якщо він змінився
+    if (sendPressure) {
+        char pressMsg[30];
+        sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
+        mesh.sendBroadcast(pressMsg);
+        Serial.printf("Sent pressure: %.2f hPa\n", pressure);
+        lastSentPressure = pressure;  // Оновлюємо останнє надіслане значення
+    }
+}
+
+void sendTemperatureAndHumidityData(float temperature, float humidity) {
+    char tempMsg[20];
+    char humMsg[20];
+
+    // Формуємо і відправляємо дані про температуру і вологість через Mesh
+    sprintf(tempMsg, "Temp: %.2f C", temperature);
+    sprintf(humMsg, "Humidity: %.2f %%", humidity);
+
+    mesh.sendBroadcast(tempMsg);
+    mesh.sendBroadcast(humMsg);
+
+    Serial.printf("Sent temperature: %.2f C, humidity: %.2f %%\n", temperature, humidity);
 }
 
 void showStopwatch() {
