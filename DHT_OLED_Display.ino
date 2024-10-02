@@ -89,6 +89,36 @@ void setup() {
         while (1);
     }
 
+    // Зчитуємо початкові дані з сенсорів
+    sensors_event_t event;
+    bmp.getEvent(&event);
+    lastSentPressure = event.pressure;
+    lastSentTemperature = dht.readTemperature();
+    lastSentHumidity = dht.readHumidity();
+
+    mesh.onNewConnection([](size_t nodeId) {
+        Serial.printf("New connection, nodeId=%u\n", nodeId);
+        
+        // Відправляємо останні дані з сенсорів новому вузлу
+        if (lastSentTemperature != -999.0) {
+            char tempMsg[20];
+            sprintf(tempMsg, "Temp: %.2f C", lastSentTemperature);
+            mesh.sendSingle(nodeId, tempMsg);
+        }
+
+        if (lastSentHumidity != -999.0) {
+            char humMsg[20];
+            sprintf(humMsg, "Humidity: %.2f %%", lastSentHumidity);
+            mesh.sendSingle(nodeId, humMsg);
+        }
+
+        if (lastSentPressure != -999.0) {
+            char pressMsg[30];
+            sprintf(pressMsg, "Pressure: %.2f hPa", lastSentPressure);
+            mesh.sendSingle(nodeId, pressMsg);
+        }
+    });
+
     mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
     mesh.onReceive([](uint32_t from, String &msg) {
@@ -99,6 +129,7 @@ void setup() {
     welcomeScreenStartTime = millis();
     isWelcomeScreenVisible = true;
 }
+
 
 void loop() {
     // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
@@ -257,51 +288,32 @@ void sendPressureData(float pressure) {
 void readAndSendData() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
+    sensors_event_t event;
+    bmp.getEvent(&event);
+    float pressure = event.pressure;
 
-    // Оновлення тиску лише раз на певний інтервал
-    unsigned long currentMillis = millis();
-    float pressure = -999;  // Значення за замовчуванням, якщо тиск не оновлюється
+    // Відправляємо температуру
+    char tempMsg[20];
+    sprintf(tempMsg, "Temp: %.2f C", temperature);
+    mesh.sendBroadcast(tempMsg);
+    Serial.printf("Sent temperature: %.2f C\n", temperature);
+    lastSentTemperature = temperature;
 
-    // Оновлюємо тиск лише, якщо пройшов встановлений інтервал
-    if (currentMillis - lastPressureUpdateTime >= pressureUpdateInterval) {
-        sensors_event_t event;
-        bmp.getEvent(&event);
-        pressure = event.pressure;
-        lastPressureUpdateTime = currentMillis;  // Оновлюємо час останнього оновлення тиску
-    }
+    // Відправляємо вологість
+    char humMsg[20];
+    sprintf(humMsg, "Humidity: %.2f %%", humidity);
+    mesh.sendBroadcast(humMsg);
+    Serial.printf("Sent humidity: %.2f %%\n", humidity);
+    lastSentHumidity = humidity;
 
-    // Перевіряємо, чи змінились значення температури, вологості або тиску
-    bool sendTemperature = (temperature != lastSentTemperature);
-    bool sendHumidity = (humidity != lastSentHumidity);
-    bool sendPressure = (pressure != lastSentPressure && pressure != -999);  // Перевірка, чи дійсно отримали нове значення тиску
-
-    // Надсилаємо температуру тільки якщо вона змінилась
-    if (sendTemperature) {
-        char tempMsg[20];
-        sprintf(tempMsg, "Temp: %.2f C", temperature);
-        mesh.sendBroadcast(tempMsg);
-        Serial.printf("Sent temperature: %.2f C\n", temperature);
-        lastSentTemperature = temperature;  // Оновлюємо останнє надіслане значення
-    }
-
-    // Надсилаємо вологість тільки якщо вона змінилась
-    if (sendHumidity) {
-        char humMsg[20];
-        sprintf(humMsg, "Humidity: %.2f %%", humidity);
-        mesh.sendBroadcast(humMsg);
-        Serial.printf("Sent humidity: %.2f %%\n", humidity);
-        lastSentHumidity = humidity;  // Оновлюємо останнє надіслане значення
-    }
-
-    // Надсилаємо тиск тільки якщо він змінився
-    if (sendPressure) {
-        char pressMsg[30];
-        sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
-        mesh.sendBroadcast(pressMsg);
-        Serial.printf("Sent pressure: %.2f hPa\n", pressure);
-        lastSentPressure = pressure;  // Оновлюємо останнє надіслане значення
-    }
+    // Відправляємо тиск
+    char pressMsg[30];
+    sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
+    mesh.sendBroadcast(pressMsg);
+    Serial.printf("Sent pressure: %.2f hPa\n", pressure);
+    lastSentPressure = pressure;
 }
+
 
 void sendTemperatureAndHumidityData(float temperature, float humidity) {
     char tempMsg[20];
