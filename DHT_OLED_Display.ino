@@ -67,16 +67,13 @@ const long interval = 10000;
 unsigned long lastWeatherUpdateTime = 0;
 const unsigned long weatherUpdateInterval = 500; 
 
-unsigned long lastPressureUpdateTime = 0;
-const unsigned long pressureUpdateInterval = 60000;  
+unsigned long lastPressureUpdateTime = 0;  // Час останнього оновлення тиску
+const unsigned long pressureUpdateInterval = 60000;  // 
+
 
 WiFiUDP ntpUDP;
 const long utcOffsetInSeconds = 10800;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
-
-const int menuItemCount = 5; // Кількість пунктів меню
-int menuStartIndex = 0; // Індекс початку видимих пунктів меню
-const int visibleMenuItems = 3; // Кількість пунктів, що видно одночасно
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -92,6 +89,7 @@ void setup() {
         while (1);
     }
 
+    // Зчитуємо початкові дані з сенсорів
     sensors_event_t event;
     bmp.getEvent(&event);
     lastSentPressure = event.pressure;
@@ -100,16 +98,20 @@ void setup() {
 
     mesh.onNewConnection([](size_t nodeId) {
         Serial.printf("New connection, nodeId=%u\n", nodeId);
+        
+        // Відправляємо останні дані з сенсорів новому вузлу
         if (lastSentTemperature != -999.0) {
             char tempMsg[20];
             sprintf(tempMsg, "Temp: %.2f C", lastSentTemperature);
             mesh.sendSingle(nodeId, tempMsg);
         }
+
         if (lastSentHumidity != -999.0) {
             char humMsg[20];
             sprintf(humMsg, "Humidity: %.2f %%", lastSentHumidity);
             mesh.sendSingle(nodeId, humMsg);
         }
+
         if (lastSentPressure != -999.0) {
             char pressMsg[30];
             sprintf(pressMsg, "Pressure: %.2f hPa", lastSentPressure);
@@ -128,61 +130,79 @@ void setup() {
     isWelcomeScreenVisible = true;
 }
 
+
 void loop() {
+    // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
     mesh.update();
+
+    // Обробка натискань кнопок
     handleButtonPress();
 
+    // Перевірка на режим заставки
     if (screensaverMode) {
         showImage();
-        readAndSendData();
+        // Навіть у режимі заставки ми хочемо передавати дані в Mesh
+        readAndSendData();  // Надсилаємо дані з датчиків
         return;
     }
 
+    // Перевірка на вітальну заставку
     if (isWelcomeScreenVisible) {
         if (millis() - welcomeScreenStartTime > 3000) {
             isWelcomeScreenVisible = false;
         } else {
+            // Навіть під час відображення вітальної заставки надсилаємо дані
             readAndSendData();
             return;
         }
     }
 
-    handleJoystickMovement();
+    // Зчитування стану джойстика
+    u8g2.clearBuffer();
+    int joystickY = analogRead(JOYSTICK_Y_PIN);
 
+    // Якщо ми не в підменю, то обробляємо джойстик для вибору пунктів меню
+    if (!inSubMenu) {
+        if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
+            if (joystickY < 1000) {
+                menuOption--;
+                if (menuOption < 0) {
+                    menuOption = 2;  // Повертаємося до останнього пункту, якщо перевищено межі
+                }
+                lastJoystickDebounceTime = millis();
+                Serial.print("Joystick moved up. New menuOption: ");
+                Serial.println(menuOption);
+            } else if (joystickY > 3000) {
+                menuOption++;
+                if (menuOption > 2) {
+                    menuOption = 0;  // Повертаємося до першого пункту, якщо перевищено межі
+                }
+                lastJoystickDebounceTime = millis();
+                Serial.print("Joystick moved down. New menuOption: ");
+                Serial.println(menuOption);
+            }
+        }
+
+        // Відображаємо меню
+        showMenu();
+    } else {
+        // В залежності від обраного пункту меню викликаємо відповідну функцію
+        if (menuOption == 0) {
+            showTemperatureAndHumidity();
+        } else if (menuOption == 1) {
+            showWeather();
+        } else if (menuOption == 2) {
+            showStopwatch();
+        }
+    }
+
+    // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
-        readAndSendData();
+        readAndSendData();  // Функція, яка збирає дані з датчиків і відправляє їх у Mesh
         lastSerialUpdateTime = millis();
     }
 }
 
-void handleJoystickMovement() {
-    int joystickY = analogRead(JOYSTICK_Y_PIN);
-
-    if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
-        if (joystickY < 1000) {
-            menuOption--;
-            if (menuOption < 0) {
-                menuOption = menuItemCount - 1;
-            }
-            lastJoystickDebounceTime = millis();
-
-            if (menuOption < menuStartIndex) {
-                menuStartIndex = menuOption;
-            }
-        } else if (joystickY > 3000) {
-            menuOption++;
-            if (menuOption >= menuItemCount) {
-                menuOption = 0;
-            }
-            lastJoystickDebounceTime = millis();
-
-            if (menuOption >= menuStartIndex + visibleMenuItems) {
-                menuStartIndex = menuOption - visibleMenuItems + 1;
-            }
-        }
-        showMenu();
-    }
-}
 
 void handleButtonPress() {
     int reading = digitalRead(BUTTON_PIN);
@@ -231,35 +251,6 @@ void handleButtonPress() {
     }
 }
 
-void showMenu() {
-    u8g2.clearBuffer();
-    u8g2.enableUTF8Print();
-    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-
-    for (int i = 0; i < visibleMenuItems; i++) {
-        int menuIndex = (menuStartIndex + i) % menuItemCount;
-        int y = 20 + i * 20;
-        u8g2.setCursor(10, y);
-
-        int textWidth = u8g2.getStrWidth(menuIndex == 0 ? "Кімната" : menuIndex == 1 ? "Вулиця" : menuIndex == 2 ? "Секундомір" : menuIndex == 3 ? "Тиск" : "Інше");
-
-        if (menuOption == menuIndex) {
-            u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4);
-            u8g2.print("> ");
-        } else {
-            u8g2.print("  ");
-        }
-
-        if (menuIndex == 0) u8g2.print("Кімната");
-        else if (menuIndex == 1) u8g2.print("Вулиця");
-        else if (menuIndex == 2) u8g2.print("Секундомір");
-        else if (menuIndex == 3) u8g2.print("Тиск");
-        else if (menuIndex == 4) u8g2.print("Інше");
-    }
-
-    u8g2.sendBuffer();
-}
-
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
@@ -284,13 +275,68 @@ void showTemperatureAndHumidity() {
     }
 }
 
+void sendPressureData(float pressure) {
+    if (pressure != -999) {  // Переконуємося, що тиск отримано коректно
+        // Формуємо і відправляємо повідомлення про тиск через Mesh
+        char msg[30];
+        sprintf(msg, "Pressure: %.2f hPa", pressure);
+        mesh.sendBroadcast(msg);
+        Serial.printf("Sent pressure to mesh: %.2f hPa\n", pressure);
+    }
+}
+
+void readAndSendData() {
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+    sensors_event_t event;
+    bmp.getEvent(&event);
+    float pressure = event.pressure;
+
+    // Відправляємо температуру
+    char tempMsg[20];
+    sprintf(tempMsg, "Temp: %.2f C", temperature);
+    mesh.sendBroadcast(tempMsg);
+    Serial.printf("Sent temperature: %.2f C\n", temperature);
+    lastSentTemperature = temperature;
+
+    // Відправляємо вологість
+    char humMsg[20];
+    sprintf(humMsg, "Humidity: %.2f %%", humidity);
+    mesh.sendBroadcast(humMsg);
+    Serial.printf("Sent humidity: %.2f %%\n", humidity);
+    lastSentHumidity = humidity;
+
+    // Відправляємо тиск
+    char pressMsg[30];
+    sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
+    mesh.sendBroadcast(pressMsg);
+    Serial.printf("Sent pressure: %.2f hPa\n", pressure);
+    lastSentPressure = pressure;
+}
+
+
+void sendTemperatureAndHumidityData(float temperature, float humidity) {
+    char tempMsg[20];
+    char humMsg[20];
+
+    // Формуємо і відправляємо дані про температуру і вологість через Mesh
+    sprintf(tempMsg, "Temp: %.2f C", temperature);
+    sprintf(humMsg, "Humidity: %.2f %%", humidity);
+
+    mesh.sendBroadcast(tempMsg);
+    mesh.sendBroadcast(humMsg);
+
+    Serial.printf("Sent temperature: %.2f C, humidity: %.2f %%\n", temperature, humidity);
+}
+
 void showStopwatch() {
     unsigned long previousMillis = 0;
-    const unsigned long interval = 1000;
+    const unsigned long interval = 1000;  // Оновлюємо екран кожну секунду
 
     while (inSubMenu) {
         unsigned long currentMillis = millis();
 
+        // Оновлюємо дисплей кожну секунду
         if (currentMillis - previousMillis >= interval) {
             previousMillis = currentMillis;
 
@@ -307,14 +353,93 @@ void showStopwatch() {
             Serial.printf("Stopwatch time: %02d:%02d\n", minutes, seconds);
         }
 
+        // Оновлення Mesh-сітки для підтримання зв'язку
         mesh.update();
+
+        // Викликаємо функцію readAndSendData() для постійного надсилання даних із сенсорів
         readAndSendData();
 
+        // Перевіряємо на натискання кнопки для виходу з підменю
         if (handleReturnButton()) {
             inSubMenu = false;
             stopwatchRunning = false;
             Serial.println("Button pressed. Returning to main menu.");
         }
+    }
+}
+
+void showImage() {
+    u8g2.clearBuffer();
+    u8g2.drawBitmap(0, 0, 16, 128, image);
+    u8g2.sendBuffer();
+}
+
+void showMenu() {
+    u8g2.clearBuffer();
+    u8g2.enableUTF8Print();
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+
+    for (int i = 0; i < 3; i++) {
+        int y = 20 + i * 20;
+        u8g2.setCursor(10, y);
+
+        int textWidth = u8g2.getStrWidth((i == 0) ? "Кімната" : (i == 1) ? "Вулиця" : "Секундомір");
+
+        if (menuOption == i) {
+            u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4);
+            u8g2.print("> ");
+        } else {
+            u8g2.print("  ");
+        }
+
+        if (i == 0) u8g2.print("Кімната");
+        else if (i == 1) u8g2.print("Вулиця");
+        else if (i == 2) u8g2.print("Секундомір");
+    }
+
+    u8g2.sendBuffer();
+}
+
+void connectToWiFi() {
+    Serial.println("Attempting to connect to WiFi...");
+    WiFi.begin(ssid, password);
+    int attempt = 0;
+    unsigned long startAttemptTime = millis();
+    while (WiFi.status() != WL_CONNECTED && attempt < 30) {
+        if (millis() - startAttemptTime >= 1000) {
+            Serial.print(".");
+            startAttemptTime = millis();
+            attempt++;
+        }
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to WiFi");
+    } else {
+        Serial.println("Failed to connect to WiFi");
+    }
+}
+
+void updateWeather() {
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Attempting to update weather...");
+        HTTPClient http;
+        http.begin("http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&lang=ua&appid=89b5c4878e84804573dae7a6c3628e94&units=metric");
+        int httpCode = http.GET();
+
+        if (httpCode > 0) {
+            String payload = http.getString();
+            Serial.println("Weather Payload: " + payload);
+            DynamicJsonDocument doc(2048);
+            deserializeJson(doc, payload);
+            weatherDescription = doc["weather"][0]["description"].as<String>();
+            weatherTemp = doc["main"]["temp"];
+            Serial.printf("Weather updated: %s, %.2f °C\n", weatherDescription.c_str(), weatherTemp);
+        } else {
+            Serial.println("HTTP GET failed: " + String(httpCode));
+        }
+        http.end();
+    } else {
+        Serial.println("Not connected to WiFi");
     }
 }
 
@@ -363,81 +488,6 @@ void showWeather() {
             timeClient.end();
         }
     }
-}
-
-void connectToWiFi() {
-    Serial.println("Attempting to connect to WiFi...");
-    WiFi.begin(ssid, password);
-    int attempt = 0;
-    unsigned long startAttemptTime = millis();
-    while (WiFi.status() != WL_CONNECTED && attempt < 30) {
-        if (millis() - startAttemptTime >= 1000) {
-            Serial.print(".");
-            startAttemptTime = millis();
-            attempt++;
-        }
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("Connected to WiFi");
-    } else {
-        Serial.println("Failed to connect to WiFi");
-    }
-}
-
-void updateWeather() {
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("Attempting to update weather...");
-        HTTPClient http;
-        http.begin("http://api.openweathermap.org/data/2.5/weather?q=Khmelnytskyi&lang=ua&appid=89b5c4878e84804573dae7a6c3628e94&units=metric");
-        int httpCode = http.GET();
-
-        if (httpCode > 0) {
-            String payload = http.getString();
-            Serial.println("Weather Payload: " + payload);
-            DynamicJsonDocument doc(2048);
-            deserializeJson(doc, payload);
-            weatherDescription = doc["weather"][0]["description"].as<String>();
-            weatherTemp = doc["main"]["temp"];
-            Serial.printf("Weather updated: %s, %.2f °C\n", weatherDescription.c_str(), weatherTemp);
-        } else {
-            Serial.println("HTTP GET failed: " + String(httpCode));
-        }
-        http.end();
-    } else {
-        Serial.println("Not connected to WiFi");
-    }
-}
-
-void readAndSendData() {
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    sensors_event_t event;
-    bmp.getEvent(&event);
-    float pressure = event.pressure;
-
-    char tempMsg[20];
-    sprintf(tempMsg, "Temp: %.2f C", temperature);
-    mesh.sendBroadcast(tempMsg);
-    Serial.printf("Sent temperature: %.2f C\n", temperature);
-    lastSentTemperature = temperature;
-
-    char humMsg[20];
-    sprintf(humMsg, "Humidity: %.2f %%", humidity);
-    mesh.sendBroadcast(humMsg);
-    Serial.printf("Sent humidity: %.2f %%\n", humidity);
-    lastSentHumidity = humidity;
-
-    char pressMsg[30];
-    sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
-    mesh.sendBroadcast(pressMsg);
-    Serial.printf("Sent pressure: %.2f hPa\n", pressure);
-    lastSentPressure = pressure;
-}
-
-void showImage() {
-    u8g2.clearBuffer();
-    u8g2.drawBitmap(0, 0, 16, 128, image);
-    u8g2.sendBuffer();
 }
 
 
