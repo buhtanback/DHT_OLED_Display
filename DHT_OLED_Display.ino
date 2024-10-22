@@ -71,6 +71,9 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
+int totalMenuOptions = 5; // Загальна кількість пунктів меню
+int maxDisplayOptions = 3;
+
 WiFiUDP ntpUDP;
 const long utcOffsetInSeconds = 10800;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
@@ -167,15 +170,15 @@ void loop() {
             if (joystickY < 1000) {
                 menuOption--;
                 if (menuOption < 0) {
-                    menuOption = 2;  // Повертаємося до останнього пункту, якщо перевищено межі
+                    menuOption = totalMenuOptions - 1;  // Перехід до останнього пункту
                 }
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved up. New menuOption: ");
                 Serial.println(menuOption);
             } else if (joystickY > 3000) {
                 menuOption++;
-                if (menuOption > 2) {
-                    menuOption = 0;  // Повертаємося до першого пункту, якщо перевищено межі
+                if (menuOption >= totalMenuOptions) {
+                    menuOption = 0;  // Перехід до першого пункту
                 }
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved down. New menuOption: ");
@@ -188,12 +191,16 @@ void loop() {
     } else {
         // В залежності від обраного пункту меню викликаємо відповідну функцію
         if (menuOption == 0) {
-            showTemperatureAndHumidity();
-        } else if (menuOption == 1) {
-            showWeather();
-        } else if (menuOption == 2) {
-            showStopwatch();
-        }
+          showTemperatureAndHumidity();  // Перший пункт меню
+      } else if (menuOption == 1) {
+          showWeather();  // Другий пункт меню
+      } else if (menuOption == 2) {
+          showStopwatch();  // Третій пункт меню
+      } else if (menuOption == 3) {
+          showPressure();  // Четвертий пункт меню (Тиск)
+      } else if (menuOption == 4) {
+          showTimer();  // П'ятий пункт меню (Таймер)
+      }
     }
 
     // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
@@ -379,22 +386,32 @@ void showMenu() {
     u8g2.enableUTF8Print();
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
 
-    for (int i = 0; i < 3; i++) {
+    int startOption = menuOption / maxDisplayOptions * maxDisplayOptions;
+
+    for (int i = 0; i < maxDisplayOptions; i++) {
+        int optionIndex = startOption + i;
+        if (optionIndex >= totalMenuOptions) break; // Якщо перевищуємо кількість опцій
+
         int y = 20 + i * 20;
         u8g2.setCursor(10, y);
 
-        int textWidth = u8g2.getStrWidth((i == 0) ? "Кімната" : (i == 1) ? "Вулиця" : "Секундомір");
+        // Оновлені назви для нових пунктів меню
+        String optionText = (optionIndex == 0) ? "Кімната" : 
+                            (optionIndex == 1) ? "Вулиця" :
+                            (optionIndex == 2) ? "Секундомір" : 
+                            (optionIndex == 3) ? "Тиск" : 
+                            "Таймер";
 
-        if (menuOption == i) {
+        int textWidth = u8g2.getStrWidth(optionText.c_str());
+
+        if (menuOption == optionIndex) {
             u8g2.drawRBox(10 - 4, y - 15, textWidth + 8, 15, 4);
             u8g2.print("> ");
         } else {
             u8g2.print("  ");
         }
 
-        if (i == 0) u8g2.print("Кімната");
-        else if (i == 1) u8g2.print("Вулиця");
-        else if (i == 2) u8g2.print("Секундомір");
+        u8g2.print(optionText);
     }
 
     u8g2.sendBuffer();
@@ -489,6 +506,76 @@ void showWeather() {
         }
     }
 }
+
+void showTimer() {
+    unsigned long previousMillis = 0;
+    const unsigned long interval = 1000;  // Оновлюємо екран кожну секунду
+
+    while (inSubMenu) {
+        unsigned long currentMillis = millis();
+
+        if (currentMillis - previousMillis >= interval) {
+            previousMillis = currentMillis;
+
+            unsigned long elapsed = millis() - stopwatchStartTime;
+            int seconds = (elapsed / 1000) % 60;
+            int minutes = (elapsed / 60000);
+
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+            u8g2.setCursor(0, 15);
+            u8g2.printf("Таймер: %02d:%02d", minutes, seconds);
+            u8g2.sendBuffer();
+
+            Serial.printf("Timer time: %02d:%02d\n", minutes, seconds);
+        }
+
+        mesh.update();  // Оновлюємо Mesh
+
+        readAndSendData();  // Надсилаємо дані з датчиків
+
+        if (handleReturnButton()) {
+            inSubMenu = false;
+            stopwatchRunning = false;
+            Serial.println("Button pressed. Returning to main menu.");
+        }
+    }
+}
+
+
+
+void showPressure() {
+    sensors_event_t event;
+    
+    // Перевірка на коректне отримання даних
+    if (bmp.getEvent(&event)) {
+        float pressure = event.pressure;
+
+        u8g2.clearBuffer();
+        u8g2.enableUTF8Print();
+        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+        u8g2.setCursor(0, 15);
+        u8g2.printf("Тиск: %.2f hPa", pressure);
+        u8g2.sendBuffer();
+    } else {
+        // Якщо дані не отримано, виводимо повідомлення про помилку
+        u8g2.clearBuffer();
+        u8g2.enableUTF8Print();
+        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+        u8g2.setCursor(0, 15);
+        u8g2.print("Помилка датчика");
+        u8g2.sendBuffer();
+
+        Serial.println("Не вдалося отримати дані з датчика тиску.");
+    }
+
+    if (handleReturnButton()) {
+        inSubMenu = false;
+        Serial.println("Button pressed. Returning to main menu.");
+    }
+}
+
+
 
 
 bool handleReturnButton() {
