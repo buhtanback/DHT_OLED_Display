@@ -74,6 +74,16 @@ const unsigned long pressureUpdateInterval = 60000;  //
 int totalMenuOptions = 5; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
+
+unsigned long countdownTimeInMillis = 0;  // Час зворотного відліку
+bool timerRunning = false;  // Статус таймера (працює або зупинений)
+int setMinutes = 0;  // Кількість хвилин, яку можна налаштувати
+int setSeconds = 0;  // Кількість секунд, яку можна налаштувати
+int selectedButton = 0;  // 0 для "Старт", 1 для "Скинути"
+
+
+
+
 WiFiUDP ntpUDP;
 const long utcOffsetInSeconds = 10800;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
@@ -508,18 +518,95 @@ void showWeather() {
 }
 
 void showTimer() {
-    unsigned long previousMillis = 0;
+    static unsigned long lastJoystickMove = 0;  // Змінна для відстеження останнього руху джойстика
+    static unsigned long lastButtonPressTime = 0;  // Змінна для відстеження часу останнього натискання кнопки
+    static unsigned long previousMillis = 0;
+    const unsigned long debounceDelay = 200;  // 200 мс для запобігання повторним натисканням
     const unsigned long interval = 1000;  // Оновлюємо екран кожну секунду
 
-    while (inSubMenu) {
-        unsigned long currentMillis = millis();
+    unsigned long currentMillis = millis();
 
-        if (currentMillis - previousMillis >= interval) {
+    // Зчитуємо стан джойстика
+    int joystickX = analogRead(JOYSTICK_X_PIN);  // Горизонтальне переміщення для вибору кнопок
+    int joystickY = analogRead(JOYSTICK_Y_PIN);  // Вертикальне переміщення для зміни хвилин/секунд
+
+    // Переміщення джойстиком для налаштування часу (вгору/вниз)
+    if (currentMillis - lastJoystickMove > debounceDelay) {  // Обмежуємо частоту змін
+        if (joystickY < 1000) {  // Вверх — збільшення
+            setSeconds += 10;
+            if (setSeconds >= 60) {
+                setSeconds = 0;
+                setMinutes++;
+            }
+            lastJoystickMove = currentMillis;  // Оновлюємо час останнього руху джойстика
+        } else if (joystickY > 3000) {  // Вниз — зменшення
+            setSeconds -= 10;
+            if (setSeconds < 0) {
+                setSeconds = 50;
+                setMinutes--;
+                if (setMinutes < 0) setMinutes = 0;
+            }
+            lastJoystickMove = currentMillis;  // Оновлюємо час останнього руху джойстика
+        }
+    }
+
+    // Переміщення між кнопками "Старт" і "Скинути" (ліворуч/праворуч)
+    if (currentMillis - lastJoystickMove > debounceDelay) {
+        if (joystickX < 1000) {
+            selectedButton = 0;  // Вибір кнопки "Старт"
+            lastJoystickMove = currentMillis;  // Оновлюємо час останнього руху джойстика
+        } else if (joystickX > 3000) {
+            selectedButton = 1;  // Вибір кнопки "Скинути"
+            lastJoystickMove = currentMillis;  // Оновлюємо час останнього руху джойстика
+        }
+    }
+
+    // Відображаємо налаштований час та кнопки
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+
+    // Відображаємо час
+    u8g2.setCursor(0, 15);
+    u8g2.printf("Таймер: %02d:%02d", setMinutes, setSeconds);
+
+    // Відображаємо кнопки "Старт" та "Скинути"
+    u8g2.setCursor(0, 40);
+    if (selectedButton == 0) {
+        u8g2.print("> Старт  ");
+    } else {
+        u8g2.print("  Старт  ");
+    }
+    if (selectedButton == 1) {
+        u8g2.print("> Скинути");
+    } else {
+        u8g2.print("  Скинути");
+    }
+
+    u8g2.sendBuffer();
+
+    // Обробка натискання кнопки для старту або скидання таймера
+    if (digitalRead(BUTTON_PIN) == LOW && currentMillis - lastButtonPressTime > debounceDelay) {
+        if (selectedButton == 0 && !timerRunning) {
+            // Якщо вибрано "Старт" і таймер не працює
+            timerRunning = true;
+            countdownTimeInMillis = (setMinutes * 60000) + (setSeconds * 1000);  // Встановлюємо час
+            Serial.println("Таймер запущено");
+        } else if (selectedButton == 1) {
+            // Якщо вибрано "Скинути"
+            resetTimer();  // Скидаємо таймер
+        }
+        lastButtonPressTime = currentMillis;  // Оновлюємо час останнього натискання кнопки
+    }
+
+    // Якщо таймер працює, то відліковуємо час
+    if (timerRunning && countdownTimeInMillis > 0) {
+        if (currentMillis - previousMillis >= 1000) {
             previousMillis = currentMillis;
+            countdownTimeInMillis -= 1000;  // Віднімаємо секунди
 
-            unsigned long elapsed = millis() - stopwatchStartTime;
-            int seconds = (elapsed / 1000) % 60;
-            int minutes = (elapsed / 60000);
+            // Оновлюємо дисплей з поточним часом
+            int seconds = (countdownTimeInMillis / 1000) % 60;
+            int minutes = (countdownTimeInMillis / 60000);
 
             u8g2.clearBuffer();
             u8g2.setFont(u8g2_font_cu12_t_cyrillic);
@@ -527,21 +614,27 @@ void showTimer() {
             u8g2.printf("Таймер: %02d:%02d", minutes, seconds);
             u8g2.sendBuffer();
 
-            Serial.printf("Timer time: %02d:%02d\n", minutes, seconds);
-        }
-
-        mesh.update();  // Оновлюємо Mesh
-
-        readAndSendData();  // Надсилаємо дані з датчиків
-
-        if (handleReturnButton()) {
-            inSubMenu = false;
-            stopwatchRunning = false;
-            Serial.println("Button pressed. Returning to main menu.");
+            // Якщо таймер завершено
+            if (countdownTimeInMillis <= 0) {
+                timerRunning = false;
+                Serial.println("Таймер завершено!");
+            }
         }
     }
+
+    // Обробка тривалого натискання для виходу з підменю
+    handleReturnButtonPress();
 }
 
+
+
+void resetTimer() {
+    setMinutes = 0;
+    setSeconds = 0;
+    countdownTimeInMillis = 0;
+    timerRunning = false;
+    Serial.println("Таймер скинуто");
+}
 
 
 void showPressure() {
@@ -576,6 +669,45 @@ void showPressure() {
 }
 
 
+void handleTimerButtonPress() {
+    static unsigned long lastButtonPressTime = 0;
+    const unsigned long debounceDelay = 200;  // 200 мс для запобігання повторним натисканням
+    unsigned long currentMillis = millis();
+
+    if (digitalRead(BUTTON_PIN) == LOW && currentMillis - lastButtonPressTime > debounceDelay) {
+        if (selectedButton == 0 && !timerRunning) {
+            // Якщо вибрано "Старт" і таймер не працює
+            timerRunning = true;
+            countdownTimeInMillis = (setMinutes * 60000) + (setSeconds * 1000);  // Встановлюємо час
+            Serial.println("Таймер запущено");
+        } else if (selectedButton == 1) {
+            // Якщо вибрано "Скинути"
+            resetTimer();  // Скидаємо таймер
+        }
+        lastButtonPressTime = currentMillis;  // Оновлюємо час останнього натискання
+    }
+}
+
+void handleReturnButtonPress() {
+    static unsigned long buttonPressTime = 0;
+    unsigned long currentMillis = millis();
+    int buttonState = digitalRead(BUTTON_PIN);
+
+    if (buttonState == LOW) {
+        if (buttonPressTime == 0) {
+            buttonPressTime = currentMillis;  // Початок натискання
+        }
+
+        if (currentMillis - buttonPressTime > 1000) {  // Якщо натискання триває більше 1 секунди
+            inSubMenu = false;
+            timerRunning = false;
+            Serial.println("Вихід з меню");
+            buttonPressTime = 0;  // Скидаємо час натискання
+        }
+    } else {
+        buttonPressTime = 0;  // Скидаємо час натискання, якщо кнопка відпущена
+    }
+}
 
 
 bool handleReturnButton() {
