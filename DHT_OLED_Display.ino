@@ -71,7 +71,7 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
-int totalMenuOptions = 5; // Загальна кількість пунктів меню
+int totalMenuOptions = 6; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
 
@@ -83,6 +83,19 @@ bool isTimerStarted = false;
 int selectedButton = 0;    // 0: Старт, 1: Скинути
 int selectedDigit = 0;     // 0: хвилини, 1: секунди
 
+// Параметри гри
+int paddleWidth = 20;
+int paddleHeight = 3;
+float bottomPaddleX = (128 - paddleWidth) / 2.0;
+int topPaddleX = (128 - paddleWidth) / 2;
+float ballX = 64.0;
+float ballY = 32.0;
+float ballDirX = 1.0;
+float ballDirY = 1.0;
+int score = 0;
+int joystickCenter = 2048;
+const int joystickThreshold = 500;
+const long gameInterval = 10; 
 
 
 WiFiUDP ntpUDP;
@@ -91,6 +104,7 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
+    pinMode(JOYSTICK_X_PIN, INPUT); // Ініціалізація піну джойстика
     Serial.begin(115200);
 
     u8g2.begin();
@@ -102,6 +116,9 @@ void setup() {
         Serial.print("Не вдалося знайти датчик BMP085.");
         while (1);
     }
+
+    // Калібрування джойстика
+    joystickCenter = analogRead(JOYSTICK_X_PIN); // Встановлюємо початковий центр джойстика
 
     // Зчитуємо початкові дані з сенсорів
     sensors_event_t event;
@@ -145,6 +162,7 @@ void setup() {
 }
 
 
+
 void loop() {
     // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
     mesh.update();
@@ -155,8 +173,7 @@ void loop() {
     // Перевірка на режим заставки
     if (screensaverMode) {
         showImage();
-        // Навіть у режимі заставки ми хочемо передавати дані в Mesh
-        readAndSendData();  // Надсилаємо дані з датчиків
+        readAndSendData();  // Навіть у режимі заставки надсилаємо дані
         return;
     }
 
@@ -165,7 +182,6 @@ void loop() {
         if (millis() - welcomeScreenStartTime > 3000) {
             isWelcomeScreenVisible = false;
         } else {
-            // Навіть під час відображення вітальної заставки надсилаємо дані
             readAndSendData();
             return;
         }
@@ -175,7 +191,7 @@ void loop() {
     u8g2.clearBuffer();
     int joystickY = analogRead(JOYSTICK_Y_PIN);
 
-    // Якщо ми не в підменю, то обробляємо джойстик для вибору пунктів меню
+    // Якщо ми не в підменю, обробляємо джойстик для вибору пунктів меню
     if (!inSubMenu) {
         if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
             if (joystickY < 1000) {
@@ -202,24 +218,27 @@ void loop() {
     } else {
         // В залежності від обраного пункту меню викликаємо відповідну функцію
         if (menuOption == 0) {
-          showTemperatureAndHumidity();  // Перший пункт меню
-      } else if (menuOption == 1) {
-          showWeather();  // Другий пункт меню
-      } else if (menuOption == 2) {
-          showStopwatch();  // Третій пункт меню
-      } else if (menuOption == 3) {
-          showPressure();  // Четвертий пункт меню (Тиск)
-      } else if (menuOption == 4) {
-          showTimer();  // П'ятий пункт меню (Таймер)
-      }
+            showTemperatureAndHumidity();  // Перший пункт меню
+        } else if (menuOption == 1) {
+            showWeather();  // Другий пункт меню
+        } else if (menuOption == 2) {
+            showStopwatch();  // Третій пункт меню
+        } else if (menuOption == 3) {
+            showPressure();  // Четвертий пункт меню (Тиск)
+        } else if (menuOption == 4) {
+            showTimer();  // П'ятий пункт меню (Таймер)
+        } else if (menuOption == 5) {
+            showGame();  // Шостий пункт меню (Гра)
+        }
     }
 
     // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
-        readAndSendData();  // Функція, яка збирає дані з датчиків і відправляє їх у Mesh
+        readAndSendData();
         lastSerialUpdateTime = millis();
     }
 }
+
 
 
 void handleButtonPress() {
@@ -408,10 +427,11 @@ void showMenu() {
 
         // Оновлені назви для нових пунктів меню
         String optionText = (optionIndex == 0) ? "Кімната" : 
-                            (optionIndex == 1) ? "Вулиця" :
-                            (optionIndex == 2) ? "Секундомір" : 
-                            (optionIndex == 3) ? "Тиск" : 
-                            "Таймер";
+                    (optionIndex == 1) ? "Вулиця" :
+                    (optionIndex == 2) ? "Секундомір" : 
+                    (optionIndex == 3) ? "Тиск" : 
+                    (optionIndex == 4) ? "Таймер" :
+                    (optionIndex == 5) ? "Гра" : "";
 
         int textWidth = u8g2.getStrWidth(optionText.c_str());
 
@@ -574,7 +594,7 @@ void showTimer() {
         lastJoystickMove = currentMillis;
     }
 
-    // Відображаємо інтерфейс на екрані
+    // Відображаємо інтерфейс на екрані лише один раз
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
 
@@ -688,6 +708,63 @@ void resetTimer() {
     isTimerStarted = false;  // Скидаємо статус таймера
     Serial.println("Таймер скинуто");
 }
+
+void showGame() {
+    static unsigned long gamePreviousMillis = 0;
+    const long gameInterval = 10; // Інтервал для гри
+    unsigned long currentMillis = millis();
+    
+    if (currentMillis - gamePreviousMillis >= gameInterval) {
+        gamePreviousMillis = currentMillis;
+
+        int joystickX = analogRead(JOYSTICK_X_PIN);
+        int joystickOffset = joystickCenter - joystickX;
+
+        if (joystickOffset > joystickThreshold) {
+            bottomPaddleX += 1.0;
+        } else if (joystickOffset < -joystickThreshold) {
+            bottomPaddleX -= 1.0;
+        }
+
+        if (bottomPaddleX < 0) bottomPaddleX = 0;
+        if (bottomPaddleX > 128 - paddleWidth) bottomPaddleX = 128 - paddleWidth;
+
+        ballX += ballDirX;
+        ballY += ballDirY;
+
+        if (ballX <= 0 || ballX >= 128) ballDirX *= -1;
+        if (ballY <= 0) {
+            ballDirY *= -1;
+        } else if (ballY >= 61 - paddleHeight && ballX >= bottomPaddleX && ballX <= bottomPaddleX + paddleWidth) {
+            ballDirY *= -1;
+            score++;
+        }
+
+        if (ballY > 64) {
+            ballX = 64;
+            ballY = 32;
+            ballDirY = 1;
+            score = 0;
+        }
+
+        u8g2.clearBuffer();
+        u8g2.drawBox((int)bottomPaddleX, 61, paddleWidth, paddleHeight);
+        u8g2.drawBox(topPaddleX, 0, paddleWidth, paddleHeight);
+        u8g2.drawDisc((int)ballX, (int)ballY, 2, U8G2_DRAW_ALL);
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.setCursor(0, 10);
+        u8g2.print("Score: ");
+        u8g2.print(score);
+        u8g2.sendBuffer();
+
+        // Повернення до меню при натисканні кнопки
+        if (digitalRead(BUTTON_PIN) == LOW) {
+            inSubMenu = false;
+        }
+    }
+}
+
+
 
 void showPressure() {
     sensors_event_t event;
