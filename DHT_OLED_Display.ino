@@ -61,6 +61,30 @@ int lastPrintedSecond = -1;
 String weatherDescription;
 float weatherTemp;
 
+long utcOffsetInSecondsSummer = 7200; // Літній час
+long utcOffsetInSecondsWinter = 3600; // Зимовий час
+
+
+
+long getCurrentUtcOffset(unsigned long epochTime) {
+    struct tm * timeInfo = gmtime((time_t *)&epochTime);
+
+    int month = timeInfo->tm_mon + 1; // Місяці від 0 до 11
+    int day = timeInfo->tm_mday;
+
+    if ((month > 3 && month < 10) || (month == 3 && day >= 25) || (month == 10 && day < 25)) {
+        return 7200; // Літній час (UTC+2)
+    } else {
+        return 3600; // Зимовий час (UTC+1)
+    }
+}
+
+// Ініціалізуємо NTP-клієнт без встановлення зміщення часу
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "time.nist.gov", 0);
+
+
+
 unsigned long previousMillis = 0;
 const long interval = 10000;
 
@@ -98,14 +122,13 @@ const int joystickThreshold = 500;
 const long gameInterval = 10; 
 
 
-WiFiUDP ntpUDP;
-const long utcOffsetInSeconds = 10800;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
+
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
-    pinMode(JOYSTICK_X_PIN, INPUT); // Ініціалізація піну джойстика
     Serial.begin(115200);
+
+    
 
     u8g2.begin();
     u8g2.clearBuffer();
@@ -117,8 +140,13 @@ void setup() {
         while (1);
     }
 
-    // Калібрування джойстика
-    joystickCenter = analogRead(JOYSTICK_X_PIN); // Встановлюємо початковий центр джойстика
+    // Ініціалізація пінів джойстика
+    pinMode(JOYSTICK_X_PIN, INPUT);
+    pinMode(JOYSTICK_Y_PIN, INPUT);
+    pinMode(BUTTON_PIN, INPUT_PULLUP); // Кнопка джойстика
+
+    // Калібрування центру джойстика
+    joystickCenter = analogRead(JOYSTICK_X_PIN);
 
     // Зчитуємо початкові дані з сенсорів
     sensors_event_t event;
@@ -128,26 +156,7 @@ void setup() {
     lastSentHumidity = dht.readHumidity();
 
     mesh.onNewConnection([](size_t nodeId) {
-        Serial.printf("New connection, nodeId=%u\n", nodeId);
-        
-        // Відправляємо останні дані з сенсорів новому вузлу
-        if (lastSentTemperature != -999.0) {
-            char tempMsg[20];
-            sprintf(tempMsg, "Temp: %.2f C", lastSentTemperature);
-            mesh.sendSingle(nodeId, tempMsg);
-        }
-
-        if (lastSentHumidity != -999.0) {
-            char humMsg[20];
-            sprintf(humMsg, "Humidity: %.2f %%", lastSentHumidity);
-            mesh.sendSingle(nodeId, humMsg);
-        }
-
-        if (lastSentPressure != -999.0) {
-            char pressMsg[30];
-            sprintf(pressMsg, "Pressure: %.2f hPa", lastSentPressure);
-            mesh.sendSingle(nodeId, pressMsg);
-        }
+        // Ваш код для обробки нових з'єднань
     });
 
     mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
@@ -163,12 +172,18 @@ void setup() {
 
 
 
+
 void loop() {
     // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
     mesh.update();
+  
+
+
 
     // Обробка натискань кнопок
     handleButtonPress();
+
+
 
     // Перевірка на режим заставки
     if (screensaverMode) {
@@ -494,17 +509,28 @@ void updateWeather() {
 void showWeather() {
     mesh.stop();
     connectToWiFi();
-    timeClient.begin();
-    updateWeather();
+    updateWeather();  // Оновлюємо погоду
+
+    // Оновлюємо час лише раз перед входом у цикл
+    timeClient.update();  // Отримуємо час з NTP-сервера
+    unsigned long epochTime = timeClient.getEpochTime();
+    long utcOffset = getCurrentUtcOffset(epochTime);
+    timeClient.setTimeOffset(utcOffset);
+
+    unsigned long lastTimeUpdate = 0;
+    const unsigned long timeUpdateInterval = 600000; // 10 хвилин
 
     while (inSubMenu) {
-        timeClient.update();
+        // Оновлюємо час раз на 10 хвилин
+        if (millis() - lastTimeUpdate >= timeUpdateInterval) {
+            timeClient.update();
+            lastTimeUpdate = millis();
+        }
 
         int currentHour = timeClient.getHours();
         int currentMinute = timeClient.getMinutes();
         int currentSecond = timeClient.getSeconds();
 
-        unsigned long epochTime = timeClient.getEpochTime();
         struct tm *ptm = gmtime((time_t *)&epochTime);
         int currentDay = ptm->tm_mday;
         int currentMonth = ptm->tm_mon + 1;
@@ -537,7 +563,6 @@ void showWeather() {
         }
     }
 }
-
 
 
 void showTimer() {
@@ -700,6 +725,7 @@ void showTimer() {
 
 
 
+
 void resetTimer() {
     setMinutes = 0;
     setSeconds = 0;
@@ -711,59 +737,72 @@ void resetTimer() {
 
 void showGame() {
     static unsigned long gamePreviousMillis = 0;
-    const long gameInterval = 10; // Інтервал для гри
+    const long gameInterval = 10; // Інтервал для оновлення гри
     unsigned long currentMillis = millis();
-    
+
+    // Оновлюємо логіку гри з заданим інтервалом
     if (currentMillis - gamePreviousMillis >= gameInterval) {
         gamePreviousMillis = currentMillis;
 
+        // Читання положення джойстика
         int joystickX = analogRead(JOYSTICK_X_PIN);
         int joystickOffset = joystickCenter - joystickX;
 
-        if (joystickOffset > joystickThreshold) {
+        // Рух панелі на основі зміщення джойстика
+        if (joystickOffset > joystickThreshold) { // Рух праворуч
             bottomPaddleX += 1.0;
-        } else if (joystickOffset < -joystickThreshold) {
+        } else if (joystickOffset < -joystickThreshold) { // Рух ліворуч
             bottomPaddleX -= 1.0;
         }
 
+        // Обмеження положення панелі в межах екрану
         if (bottomPaddleX < 0) bottomPaddleX = 0;
         if (bottomPaddleX > 128 - paddleWidth) bottomPaddleX = 128 - paddleWidth;
 
+        // Оновлення позиції м'ячика
         ballX += ballDirX;
         ballY += ballDirY;
 
+        // Відбивання м'ячика від стінок
         if (ballX <= 0 || ballX >= 128) ballDirX *= -1;
         if (ballY <= 0) {
             ballDirY *= -1;
         } else if (ballY >= 61 - paddleHeight && ballX >= bottomPaddleX && ballX <= bottomPaddleX + paddleWidth) {
+            // Відбивання м'ячика від нижньої панелі
             ballDirY *= -1;
-            score++;
+            score++;  // Збільшення очок
         }
 
+        // Перевірка на програш (м'ячик пішов за нижній край)
         if (ballY > 64) {
+            // Скидання положень
             ballX = 64;
             ballY = 32;
             ballDirY = 1;
-            score = 0;
+            score = 0; // Обнулення рахунку
         }
 
+        // Малювання елементів
         u8g2.clearBuffer();
-        u8g2.drawBox((int)bottomPaddleX, 61, paddleWidth, paddleHeight);
-        u8g2.drawBox(topPaddleX, 0, paddleWidth, paddleHeight);
-        u8g2.drawDisc((int)ballX, (int)ballY, 2, U8G2_DRAW_ALL);
-        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.drawBox((int)bottomPaddleX, 61, paddleWidth, paddleHeight);  // Нижня панель
+        u8g2.drawBox(topPaddleX, 0, paddleWidth, paddleHeight);           // Верхня панель
+        u8g2.drawDisc((int)ballX, (int)ballY, 2, U8G2_DRAW_ALL);          // М'ячик
+
+        // Вивід рахунку на екран
+        u8g2.setFont(u8g2_font_ncenB08_tr);  // Встановлення шрифту
         u8g2.setCursor(0, 10);
         u8g2.print("Score: ");
         u8g2.print(score);
-        u8g2.sendBuffer();
 
-        // Повернення до меню при натисканні кнопки
-        if (digitalRead(BUTTON_PIN) == LOW) {
-            inSubMenu = false;
-        }
+        u8g2.sendBuffer();
+    }
+
+    // Перевірка на натискання кнопки для виходу з гри
+    if (digitalRead(BUTTON_PIN) == LOW) {
+        delay(200);  // Захист від "дребезгу" кнопки
+        inSubMenu = false;
     }
 }
-
 
 
 void showPressure() {
