@@ -64,6 +64,7 @@ float weatherTemp;
 long utcOffsetInSecondsSummer = 7200; // Літній час
 long utcOffsetInSecondsWinter = 3600; // Зимовий час
 
+bool isBMPAvailable = true;
 
 
 long getCurrentUtcOffset(unsigned long epochTime) {
@@ -128,8 +129,6 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     Serial.begin(115200);
 
-    
-
     u8g2.begin();
     u8g2.clearBuffer();
     u8g2.sendBuffer();
@@ -137,26 +136,27 @@ void setup() {
     dht.begin();
     if (!bmp.begin()) {
         Serial.print("Не вдалося знайти датчик BMP085.");
-        while (1);
+        isBMPAvailable = false; // Встановлюємо змінну в false, якщо датчик не знайдено
     }
 
-    // Ініціалізація пінів джойстика
+    // Інші ініціалізації залишаємо без змін
     pinMode(JOYSTICK_X_PIN, INPUT);
     pinMode(JOYSTICK_Y_PIN, INPUT);
-    pinMode(BUTTON_PIN, INPUT_PULLUP); // Кнопка джойстика
-
-    // Калібрування центру джойстика
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    
     joystickCenter = analogRead(JOYSTICK_X_PIN);
 
-    // Зчитуємо початкові дані з сенсорів
-    sensors_event_t event;
-    bmp.getEvent(&event);
-    lastSentPressure = event.pressure;
+    if (isBMPAvailable) {
+        sensors_event_t event;
+        bmp.getEvent(&event);
+        lastSentPressure = event.pressure;
+    }
+
     lastSentTemperature = dht.readTemperature();
     lastSentHumidity = dht.readHumidity();
 
     mesh.onNewConnection([](size_t nodeId) {
-        // Ваш код для обробки нових з'єднань
+        // Код для обробки нових з'єднань
     });
 
     mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
@@ -169,7 +169,6 @@ void setup() {
     welcomeScreenStartTime = millis();
     isWelcomeScreenVisible = true;
 }
-
 
 
 
@@ -306,9 +305,13 @@ void handleButtonPress() {
 void showTemperatureAndHumidity() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
-    sensors_event_t event;
-    bmp.getEvent(&event);
-    float pressure = event.pressure;
+    float pressure = -1.0;
+
+    if (isBMPAvailable) {
+        sensors_event_t event;
+        bmp.getEvent(&event);
+        pressure = event.pressure;
+    }
 
     u8g2.clearBuffer();
     u8g2.enableUTF8Print();
@@ -317,8 +320,15 @@ void showTemperatureAndHumidity() {
     u8g2.printf("Кімната: %.2f C", temperature);
     u8g2.setCursor(0, 30);
     u8g2.printf("Волога: %.2f %%", humidity);
-    u8g2.setCursor(0, 45);
-    u8g2.printf("Тиск: %.2f hPa", pressure);
+
+    if (isBMPAvailable) {
+        u8g2.setCursor(0, 45);
+        u8g2.printf("Тиск: %.2f hPa", pressure);
+    } else {
+        u8g2.setCursor(0, 45);
+        u8g2.print("Тиск: недоступний");
+    }
+
     u8g2.sendBuffer();
 
     if (handleReturnButton()) {
@@ -327,9 +337,9 @@ void showTemperatureAndHumidity() {
     }
 }
 
+
 void sendPressureData(float pressure) {
-    if (pressure != -999) {  // Переконуємося, що тиск отримано коректно
-        // Формуємо і відправляємо повідомлення про тиск через Mesh
+    if (isBMPAvailable && pressure != -999) {
         char msg[30];
         sprintf(msg, "Pressure: %.2f hPa", pressure);
         mesh.sendBroadcast(msg);
@@ -340,31 +350,35 @@ void sendPressureData(float pressure) {
 void readAndSendData() {
     float temperature = dht.readTemperature();
     float humidity = dht.readHumidity();
-    sensors_event_t event;
-    bmp.getEvent(&event);
-    float pressure = event.pressure;
+    float pressure = -1.0;
 
-    // Відправляємо температуру
+    if (isBMPAvailable) {
+        sensors_event_t event;
+        bmp.getEvent(&event);
+        pressure = event.pressure;
+    }
+
     char tempMsg[20];
     sprintf(tempMsg, "Temp: %.2f C", temperature);
     mesh.sendBroadcast(tempMsg);
     Serial.printf("Sent temperature: %.2f C\n", temperature);
     lastSentTemperature = temperature;
 
-    // Відправляємо вологість
     char humMsg[20];
     sprintf(humMsg, "Humidity: %.2f %%", humidity);
     mesh.sendBroadcast(humMsg);
     Serial.printf("Sent humidity: %.2f %%\n", humidity);
     lastSentHumidity = humidity;
 
-    // Відправляємо тиск
-    char pressMsg[30];
-    sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
-    mesh.sendBroadcast(pressMsg);
-    Serial.printf("Sent pressure: %.2f hPa\n", pressure);
-    lastSentPressure = pressure;
+    if (isBMPAvailable) {
+        char pressMsg[30];
+        sprintf(pressMsg, "Pressure: %.2f hPa", pressure);
+        mesh.sendBroadcast(pressMsg);
+        Serial.printf("Sent pressure: %.2f hPa\n", pressure);
+        lastSentPressure = pressure;
+    }
 }
+
 
 
 void sendTemperatureAndHumidityData(float temperature, float humidity) {
@@ -806,28 +820,33 @@ void showGame() {
 
 
 void showPressure() {
-    sensors_event_t event;
-    
-    // Перевірка на коректне отримання даних
-    if (bmp.getEvent(&event)) {
-        float pressure = event.pressure;
+    if (isBMPAvailable) {
+        sensors_event_t event;
+        if (bmp.getEvent(&event)) {
+            float pressure = event.pressure;
 
-        u8g2.clearBuffer();
-        u8g2.enableUTF8Print();
-        u8g2.setFont(u8g2_font_cu12_t_cyrillic);
-        u8g2.setCursor(0, 15);
-        u8g2.printf("Тиск: %.2f hPa", pressure);
-        u8g2.sendBuffer();
+            u8g2.clearBuffer();
+            u8g2.enableUTF8Print();
+            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+            u8g2.setCursor(0, 15);
+            u8g2.printf("Тиск: %.2f hPa", pressure);
+            u8g2.sendBuffer();
+        } else {
+            u8g2.clearBuffer();
+            u8g2.enableUTF8Print();
+            u8g2.setFont(u8g2_font_cu12_t_cyrillic);
+            u8g2.setCursor(0, 15);
+            u8g2.print("Помилка датчика");
+            u8g2.sendBuffer();
+            Serial.println("Не вдалося отримати дані з датчика тиску.");
+        }
     } else {
-        // Якщо дані не отримано, виводимо повідомлення про помилку
         u8g2.clearBuffer();
         u8g2.enableUTF8Print();
         u8g2.setFont(u8g2_font_cu12_t_cyrillic);
         u8g2.setCursor(0, 15);
-        u8g2.print("Помилка датчика");
+        u8g2.print("Тиск: недоступний");
         u8g2.sendBuffer();
-
-        Serial.println("Не вдалося отримати дані з датчика тиску.");
     }
 
     if (handleReturnButton()) {
