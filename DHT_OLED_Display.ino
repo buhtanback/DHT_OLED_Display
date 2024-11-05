@@ -66,6 +66,7 @@ long utcOffsetInSecondsWinter = 3600; // Зимовий час
 
 bool isBMPAvailable = true;
 
+static unsigned long lastButtonPressTime = 0;
 
 long getCurrentUtcOffset(unsigned long epochTime) {
     struct tm * timeInfo = gmtime((time_t *)&epochTime);
@@ -751,7 +752,12 @@ void resetTimer() {
 
 void showGame() {
     static unsigned long gamePreviousMillis = 0;
-    const long gameInterval = 10; // Інтервал для оновлення гри
+    static unsigned long lastBounceTime = 0;        // Час останнього відскоку від платформи
+    static unsigned long lastButtonPressTime = 0;   // Час останнього натискання кнопки
+    static bool ballAbovePaddle = true;             // Стан м'ячика відносно платформи
+    const long gameInterval = 10;                   // Інтервал для оновлення гри
+    const long bounceDelay = 100;                   // Мінімальний інтервал між відскоками
+    const long buttonDebounceDelay = 200;           // Інтервал для обробки "дребезгу" кнопки
     unsigned long currentMillis = millis();
 
     // Оновлюємо логіку гри з заданим інтервалом
@@ -783,8 +789,14 @@ void showGame() {
             ballDirY *= -1;
         } else if (ballY >= 61 - paddleHeight && ballX >= bottomPaddleX && ballX <= bottomPaddleX + paddleWidth) {
             // Відбивання м'ячика від нижньої панелі
-            ballDirY *= -1;
-            score++;  // Збільшення очок
+            if (currentMillis - lastBounceTime > bounceDelay && ballAbovePaddle) {
+                ballDirY *= -1;
+                score++;  // Збільшення очок
+                lastBounceTime = currentMillis;  // Оновлення часу останнього відскоку
+                ballAbovePaddle = false;         // М'ячик тепер не над платформою
+            }
+        } else if (ballY < 61 - paddleHeight) {
+            ballAbovePaddle = true; // Встановлюємо, що м'ячик над платформою, коли він вище
         }
 
         // Перевірка на програш (м'ячик пішов за нижній край)
@@ -794,6 +806,7 @@ void showGame() {
             ballY = 32;
             ballDirY = 1;
             score = 0; // Обнулення рахунку
+            ballAbovePaddle = true; // Скидаємо стан
         }
 
         // Малювання елементів
@@ -811,12 +824,14 @@ void showGame() {
         u8g2.sendBuffer();
     }
 
-    // Перевірка на натискання кнопки для виходу з гри
-    if (digitalRead(BUTTON_PIN) == LOW) {
-        delay(200);  // Захист від "дребезгу" кнопки
+    // Перевірка на натискання кнопки для виходу з гри з обробкою "дребезгу"
+    if (digitalRead(BUTTON_PIN) == LOW && currentMillis - lastButtonPressTime > buttonDebounceDelay) {
+        lastButtonPressTime = currentMillis;  // Оновлення часу останнього натискання
         inSubMenu = false;
     }
 }
+
+
 
 
 void showPressure() {
