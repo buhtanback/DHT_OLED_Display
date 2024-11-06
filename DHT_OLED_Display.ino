@@ -799,12 +799,44 @@ void showGame() {
 
         // Відбивання м'ячика від стінок
         if (ballX <= 0 || ballX >= 128) ballDirX *= -1;
-        if (ballY <= 0) {
-            ballDirY *= -1;
-        } else if (ballY >= 61 - paddleHeight && ballX >= bottomPaddleX && ballX <= bottomPaddleX + paddleWidth) {
-            // Відбивання м'ячика від нижньої панелі
+
+        // Перевірка зіткнення з верхньою платформою
+        if (ballY <= paddleHeight && ballX >= topPaddleX && ballX <= topPaddleX + paddleWidth) {
+            // Відбивання м'ячика від верхньої панелі
+            if (currentMillis - lastBounceTime > bounceDelay) {
+                // Зміна напряму руху м'ячика після відбивання від верхньої платформи
+                ballDirY *= -1; // Змінюємо вертикальний напрям
+
+                // Додаємо випадковий кут для горизонтального напряму
+                float angle = random(-45, 45); // Випадковий кут від -45 до 45 градусів
+                float radians = angle * (PI / 180.0); // Конвертація в радіани
+
+                // Поточна швидкість м'ячика
+                float speed = sqrt(ballDirX * ballDirX + ballDirY * ballDirY);
+
+                // Оновлення напрямів руху м'ячика з урахуванням випадкового кута
+                ballDirX = speed * sin(radians);
+                ballDirY = speed * cos(radians);
+
+                lastBounceTime = currentMillis;  // Оновлення часу останнього відскоку
+            }
+        }
+        // Відбивання м'ячика від нижньої платформи
+        else if (ballY >= 61 - paddleHeight && ballX >= bottomPaddleX && ballX <= bottomPaddleX + paddleWidth) {
             if (currentMillis - lastBounceTime > bounceDelay && ballAbovePaddle) {
-                ballDirY *= -1;
+                // Розрахунок напряму до верхньої панелі
+                float targetX = topPaddleX + paddleWidth / 2.0;
+                float targetY = 0; // Верхній край екрана
+                float dx = targetX - ballX;
+                float dy = targetY - ballY;
+                float length = sqrt(dx * dx + dy * dy);
+                // Уникнення ділення на нуль
+                if (length == 0) length = 1;
+                // Встановлення нового напряму руху м'ячика
+                float speed = sqrt(ballDirX * ballDirX + ballDirY * ballDirY); // Поточна швидкість м'ячика
+                ballDirX = (dx / length) * speed;
+                ballDirY = (dy / length) * speed;
+
                 score++;  // Збільшення очок
                 lastBounceTime = currentMillis;  // Оновлення часу останнього відскоку
                 ballAbovePaddle = false;         // М'ячик тепер не над платформою
@@ -819,6 +851,7 @@ void showGame() {
             ballX = 64;
             ballY = 32;
             ballDirY = 1;
+            ballDirX = 0; // Додано для скидання горизонтальної швидкості
             score = 0; // Обнулення рахунку
             ballAbovePaddle = true; // Скидаємо стан
         }
@@ -844,6 +877,7 @@ void showGame() {
         inSubMenu = false;
     }
 }
+
 
 
 
