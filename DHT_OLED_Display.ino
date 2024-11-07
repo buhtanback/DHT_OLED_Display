@@ -35,9 +35,8 @@ int buttonState = 0;
 int lastButtonState = 0;
 unsigned long lastButtonDebounceTime = 0;
 unsigned long lastJoystickDebounceTime = 0;
-unsigned long buttonDebounceDelay = 50;
+unsigned long buttonDebounceDelay = 200;
 unsigned long joystickDebounceDelay = 300;
-
 bool inSubMenu = false;
 bool screensaverMode = false;
 
@@ -61,8 +60,8 @@ int lastPrintedSecond = -1;
 String weatherDescription;
 float weatherTemp;
 
-long utcOffsetInSecondsSummer = 7200; // Літній час
-long utcOffsetInSecondsWinter = 3600; // Зимовий час
+long utcOffsetInSecondsWinter = 7200;  // Зимовий час (GMT+2 для вашого UTC+3)
+long utcOffsetInSecondsSummer = 10800; // Літній час (GMT+3 для вашого UTC+3)
 
 bool isBMPAvailable = true;
 
@@ -75,9 +74,9 @@ long getCurrentUtcOffset(unsigned long epochTime) {
     int day = timeInfo->tm_mday;
 
     if ((month > 3 && month < 10) || (month == 3 && day >= 25) || (month == 10 && day < 25)) {
-        return 7200; // Літній час (UTC+2)
+        return 10800; // Літній час (UTC+2)
     } else {
-        return 3600; // Зимовий час (UTC+1)
+        return 7200; // Зимовий час (UTC+1)
     }
 }
 
@@ -99,6 +98,7 @@ const unsigned long pressureUpdateInterval = 60000;  //
 
 int totalMenuOptions = 6; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
+
 
 
 int setMinutes = 0;
@@ -176,19 +176,17 @@ void setup() {
 void loop() {
     // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
     mesh.update();
-  
 
-
-
-    // Обробка натискань кнопок
-    handleButtonPress();
-
-
+    // Обробка натискань кнопок із додатковим дебаунсом
+    if (millis() - lastButtonPressTime > buttonDebounceDelay) {
+        handleButtonPress();
+        lastButtonPressTime = millis();  // Оновлення часу останнього натискання кнопки
+    }
 
     // Перевірка на режим заставки
     if (screensaverMode) {
         showImage();
-        readAndSendData();  // Навіть у режимі заставки надсилаємо дані
+        readAndSendData();
         return;
     }
 
@@ -206,10 +204,10 @@ void loop() {
     u8g2.clearBuffer();
     int joystickY = analogRead(JOYSTICK_Y_PIN);
 
-    // Якщо ми не в підменю, обробляємо джойстик для вибору пунктів меню
+    // Обробка джойстика для вибору пунктів меню з довшим дебаунсом
     if (!inSubMenu) {
         if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
-            if (joystickY < 1000) {
+            if (joystickY < 1000) {  // Рух вгору
                 menuOption--;
                 if (menuOption < 0) {
                     menuOption = totalMenuOptions - 1;  // Перехід до останнього пункту
@@ -217,7 +215,7 @@ void loop() {
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved up. New menuOption: ");
                 Serial.println(menuOption);
-            } else if (joystickY > 3000) {
+            } else if (joystickY > 3000) {  // Рух вниз
                 menuOption++;
                 if (menuOption >= totalMenuOptions) {
                     menuOption = 0;  // Перехід до першого пункту
@@ -231,19 +229,19 @@ void loop() {
         // Відображаємо меню
         showMenu();
     } else {
-        // В залежності від обраного пункту меню викликаємо відповідну функцію
+        // Вибір відповідної функції в підменю
         if (menuOption == 0) {
-            showTemperatureAndHumidity();  // Перший пункт меню
+            showTemperatureAndHumidity();
         } else if (menuOption == 1) {
-            showWeather();  // Другий пункт меню
+            showWeather();
         } else if (menuOption == 2) {
-            showStopwatch();  // Третій пункт меню
+            showStopwatch();
         } else if (menuOption == 3) {
-            showPressure();  // Четвертий пункт меню (Тиск)
+            showPressure();
         } else if (menuOption == 4) {
-            showTimer();  // П'ятий пункт меню (Таймер)
+            showTimer();
         } else if (menuOption == 5) {
-            showGame();  // Шостий пункт меню (Гра)
+            showGame();
         }
     }
 
@@ -253,7 +251,6 @@ void loop() {
         lastSerialUpdateTime = millis();
     }
 }
-
 
 
 void handleButtonPress() {
@@ -600,13 +597,12 @@ void showTimer() {
             if (isSelectingTime) {
                 selectedDigit = (selectedDigit == 0) ? 1 : 0;  // Перемикаємо між хвилинами і секундами
             } else {
-                isSelectingTime = true;  // Повертаємося до вибору часу
+                selectedButton = (selectedButton == 0) ? 1 : 0;  // Перемикаємо між "Старт" і "Скинути"
             }
             lastJoystickMove = currentMillis;
         } else if (joystickX > 3000) {  // Праворуч
             if (isSelectingTime) {
-                isSelectingTime = false;  // Переходимо до вибору кнопок
-                selectedButton = 0;       // Починаємо з кнопки "Старт"
+                selectedDigit = (selectedDigit == 0) ? 1 : 0;  // Перемикаємо між хвилинами і секундами
             } else {
                 selectedButton = (selectedButton == 0) ? 1 : 0;  // Перемикаємо між "Старт" і "Скинути"
             }
@@ -617,35 +613,33 @@ void showTimer() {
     // Обробка вертикального переміщення джойстика
     if (currentMillis - lastJoystickMove > debounceDelay) {
         if (joystickY < 1000) {  // Вгору
-            if (isSelectingTime) {
+            if (!isSelectingTime) {
+                isSelectingTime = true;  // Повертаємося до вибору часу
+            } else {
                 // Збільшуємо значення хвилин або секунд
                 if (selectedDigit == 0) {
                     setMinutes = (setMinutes + 1) % 100;  // Максимум 99 хвилин
                 } else {
                     setSeconds = (setSeconds + 1) % 60;   // Максимум 59 секунд
                 }
-            } else {
-                // Перемикаємо вибір кнопки
-                selectedButton = 0;  // "Старт"
             }
             lastJoystickMove = currentMillis;
         } else if (joystickY > 3000) {  // Вниз
             if (isSelectingTime) {
+                isSelectingTime = false;  // Переходимо до вибору кнопок
+            } else {
                 // Зменшуємо значення хвилин або секунд
-                if (selectedDigit == 0) {
+                if (selectedButton == 0) {
                     setMinutes = (setMinutes == 0) ? 99 : setMinutes - 1;
                 } else {
                     setSeconds = (setSeconds == 0) ? 59 : setSeconds - 1;
                 }
-            } else {
-                // Перемикаємо вибір кнопки
-                selectedButton = 1;  // "Скинути"
             }
             lastJoystickMove = currentMillis;
         }
     }
 
-    // Відображаємо інтерфейс на екрані
+    // Відображення інтерфейсу
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_cu12_t_cyrillic);
 
@@ -666,7 +660,6 @@ void showTimer() {
         }
         u8g2.printf("%02d", setSeconds);
     } else {
-        // Якщо таймер працює, відображаємо лише поточний стан відліку
         int seconds = (countdownTimeInMillis / 1000) % 60;
         int minutes = (countdownTimeInMillis / 60000);
 
@@ -697,7 +690,7 @@ void showTimer() {
                     // Запускаємо таймер
                     timerRunning = true;
                     countdownTimeInMillis = (setMinutes * 60000UL) + (setSeconds * 1000UL);
-                    previousMillis = currentMillis;  // Ініціалізуємо таймер
+                    previousMillis = currentMillis;
                     Serial.println("Таймер запущено");
                 } else if (selectedButton == 1) {
                     // Скидаємо таймер
@@ -706,7 +699,6 @@ void showTimer() {
                 }
             }
         } else {
-            // Якщо таймер вже працює, натискання кнопки зупиняє його
             timerRunning = false;
             Serial.println("Таймер зупинено");
         }
@@ -729,24 +721,24 @@ void showTimer() {
 
     // Логіка для тривалого натискання кнопки для виходу з підменю
     if (digitalRead(BUTTON_PIN) == LOW) {
-        if (buttonPressDuration == 0) {  // Початок натискання
+        if (buttonPressDuration == 0) {
             buttonPressDuration = currentMillis;
         }
-
-        if (currentMillis - buttonPressDuration > 1000) {  // Якщо кнопка утримується більше 1 секунди
+        if (currentMillis - buttonPressDuration > 1000) {
             inSubMenu = false;
             timerRunning = false;
             Serial.println("Вихід з підменю");
-            buttonPressDuration = 0;  // Скидаємо час натискання
+            buttonPressDuration = 0;
         }
     } else {
-        buttonPressDuration = 0;  // Скидаємо час утримання
+        buttonPressDuration = 0;
     }
 
-    // Оновлюємо Mesh та інші функції
+    // Оновлення Mesh та інших функцій
     mesh.update();
     readAndSendData();
 }
+
 
 
 
