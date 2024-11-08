@@ -35,7 +35,7 @@ int buttonState = 0;
 int lastButtonState = 0;
 unsigned long lastButtonDebounceTime = 0;
 unsigned long lastJoystickDebounceTime = 0;
-unsigned long buttonDebounceDelay = 200;
+unsigned long buttonDebounceDelay = 100;
 unsigned long joystickDebounceDelay = 300;
 bool inSubMenu = false;
 bool screensaverMode = false;
@@ -96,7 +96,7 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
-int totalMenuOptions = 6; // Загальна кількість пунктів меню
+int totalMenuOptions = 7; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
 
@@ -123,7 +123,35 @@ int joystickCenter = 2048;
 const int joystickThreshold = 500;
 const long gameInterval = 10; 
 
+// Змінні для гри Space Invaders
+const int screenWidth = 128;
+const int screenHeight = 64;
+const int playerWidth = 10;
+const int playerHeight = 3;
+int playerX = screenWidth / 2 - playerWidth / 2;
 
+const int bulletWidth = 2;
+const int bulletHeight = 3;
+
+const int enemyWidth = 8;
+const int enemyHeight = 6;
+const int maxEnemies = 5;
+int enemyX[maxEnemies];
+int enemyY[maxEnemies];
+bool enemyActive[maxEnemies];
+int enemyMoveDelay = 500;
+int enemyDirection = 1;
+
+int gameScore = 0;  // Перейменовано, щоб уникнути конфлікту зі змінною score
+bool gameOver = false;
+
+bool bulletActive = false;
+int bulletX, bulletY;
+
+unsigned long lastMoveTime = 0;
+unsigned long lastEnemyMoveTime = 0;
+unsigned long lastBulletMoveTime = 0;
+const unsigned long bulletMoveInterval = 50;
 
 
 void setup() {
@@ -229,21 +257,23 @@ void loop() {
         // Відображаємо меню
         showMenu();
     } else {
-        // Вибір відповідної функції в підменю
-        if (menuOption == 0) {
-            showTemperatureAndHumidity();
-        } else if (menuOption == 1) {
-            showWeather();
-        } else if (menuOption == 2) {
-            showStopwatch();
-        } else if (menuOption == 3) {
-            showPressure();
-        } else if (menuOption == 4) {
-            showTimer();
-        } else if (menuOption == 5) {
-            showGame();
-        }
-    }
+          // Вибір відповідної функції в підменю
+          if (menuOption == 0) {
+              showTemperatureAndHumidity();
+          } else if (menuOption == 1) {
+              showWeather();
+          } else if (menuOption == 2) {
+              showStopwatch();
+          } else if (menuOption == 3) {
+              showPressure();
+          } else if (menuOption == 4) {
+              showTimer();
+          } else if (menuOption == 5) {
+              showGame();  // Існуюча гра
+          } else if (menuOption == 6) {
+              showSpaceInvaders();  // Додано для Space Invaders
+          }
+      }
 
     // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
@@ -454,11 +484,12 @@ void showMenu() {
 
         // Оновлені назви для нових пунктів меню
         String optionText = (optionIndex == 0) ? "Кімната" : 
-                    (optionIndex == 1) ? "Вулиця" :
-                    (optionIndex == 2) ? "Секундомір" : 
-                    (optionIndex == 3) ? "Тиск" : 
-                    (optionIndex == 4) ? "Таймер" :
-                    (optionIndex == 5) ? "Гра" : "";
+                            (optionIndex == 1) ? "Вулиця" :
+                            (optionIndex == 2) ? "Секундомір" : 
+                            (optionIndex == 3) ? "Тиск" : 
+                            (optionIndex == 4) ? "Таймер" :
+                            (optionIndex == 5) ? "Гра" :
+                            (optionIndex == 6) ? "Space Invaders" : "";  // Новий пункт меню
 
         int textWidth = u8g2.getStrWidth(optionText.c_str());
 
@@ -868,6 +899,163 @@ void showGame() {
         lastButtonPressTime = currentMillis;  // Оновлення часу останнього натискання
         inSubMenu = false;
     }
+}
+
+
+
+
+void readJoystick() {
+    int joystickX = analogRead(JOYSTICK_X_PIN);
+
+    if (joystickX < 1000 && playerX > 0) {
+        playerX -= 2;
+    } else if (joystickX > 3000 && playerX < screenWidth - playerWidth) {
+        playerX += 2;
+    }
+
+    // Постріл
+    if (digitalRead(BUTTON_PIN) == LOW && !bulletActive) {
+        bulletActive = true;
+        bulletX = playerX + playerWidth / 2 - bulletWidth / 2;
+        bulletY = screenHeight - playerHeight - bulletHeight;
+    }
+}
+
+void moveBullet() {
+    bulletY -= 4;
+    if (bulletY < 0) {
+        bulletActive = false;
+    }
+}
+
+void moveEnemies() {
+    int activeEnemies = 0;  // Лічильник активних ворогів
+
+    // Переміщення ворогів вліво або вправо
+    for (int i = 0; i < maxEnemies; i++) {
+        if (enemyActive[i]) {
+            activeEnemies++;
+            enemyX[i] += enemyDirection * 2;
+            if (enemyX[i] <= 0 || enemyX[i] >= screenWidth - enemyWidth) {
+                enemyDirection *= -1;  // Зміна напряму
+                for (int j = 0; j < maxEnemies; j++) {
+                    enemyY[j] += enemyHeight;
+                }
+                break;
+            }
+            if (enemyY[i] > screenHeight) {
+                gameOver = true;
+                return;
+            }
+        }
+    }
+
+    // Якщо всі вороги знищені, перезапустити хвилю ворогів
+    if (activeEnemies == 0) {
+        resetEnemies();
+    }
+}
+
+void checkCollisions() {
+    if (bulletActive) {
+        for (int i = 0; i < maxEnemies; i++) {
+            if (enemyActive[i] &&
+                bulletX + bulletWidth > enemyX[i] && bulletX < enemyX[i] + enemyWidth &&
+                bulletY + bulletHeight > enemyY[i] && bulletY < enemyY[i] + enemyHeight) {
+                
+                enemyActive[i] = false;
+                bulletActive = false;
+                score += 10;
+                break;
+            }
+        }
+    }
+}
+
+void showSpaceInvaders() {
+    // Виклик функцій для оновлення гри
+    unsigned long currentTime = millis();
+    
+    // Оновлення стану джойстика та перевірка зіткнень
+    readJoystick();
+    checkCollisions();
+    
+    // Оновлення кулі, якщо вона активна
+    if (bulletActive && currentTime - lastBulletMoveTime > bulletMoveInterval) {
+        lastBulletMoveTime = currentTime;
+        moveBullet();
+    }
+    
+    // Оновлення ворогів із затримкою
+    if (currentTime - lastEnemyMoveTime > enemyMoveDelay) {
+        lastEnemyMoveTime = currentTime;
+        moveEnemies();
+    }
+
+    // Очищення буфера екрану перед оновленням
+    u8g2.clearBuffer();
+
+    // Малюємо гравця
+    u8g2.drawBox(playerX, screenHeight - playerHeight, playerWidth, playerHeight);
+
+    // Малюємо кулю
+    if (bulletActive) {
+        u8g2.drawBox(bulletX, bulletY, bulletWidth, bulletHeight);
+    }
+
+    // Малюємо ворогів
+    for (int i = 0; i < maxEnemies; i++) {
+        if (enemyActive[i]) {
+            drawEnemy(enemyX[i], enemyY[i]);
+        }
+    }
+
+    // Відображаємо рахунок
+    u8g2.setCursor(0, 10);
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.print("Score: ");
+    u8g2.print(score);
+
+    // Надсилаємо все на дисплей
+    u8g2.sendBuffer();
+
+    // Логіка виходу з гри при тривалому натисканні кнопки
+    static unsigned long buttonPressTime = 0;
+    if (digitalRead(BUTTON_PIN) == LOW) {
+        if (buttonPressTime == 0) {
+            buttonPressTime = millis();
+        } else if (millis() - buttonPressTime > 1000) {  // Утримуйте кнопку 1 секунду для виходу
+            inSubMenu = false;  // Повертаємося до меню
+            buttonPressTime = 0;
+            resetGame();  // Скидаємо стан гри
+        }
+    } else {
+        buttonPressTime = 0;
+    }
+}
+
+void drawEnemy(int x, int y) {
+    u8g2.drawPixel(x + 2, y + 1);
+    u8g2.drawPixel(x + 5, y + 1);
+    u8g2.drawBox(x + 1, y + 2, 6, 1);
+    u8g2.drawPixel(x, y + 3);
+    u8g2.drawBox(x + 2, y + 3, 4, 1);
+    u8g2.drawPixel(x + 7, y + 3);
+}
+
+void resetEnemies() {
+    for (int i = 0; i < maxEnemies; i++) {
+        enemyX[i] = i * (enemyWidth + 10);
+        enemyY[i] = 0;
+        enemyActive[i] = true;
+    }
+}
+
+void resetGame() {
+    gameOver = false;
+    bulletActive = false;
+    score = 0;
+    resetEnemies();
 }
 
 
