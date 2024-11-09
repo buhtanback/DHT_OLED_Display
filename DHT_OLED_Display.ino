@@ -96,7 +96,7 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
-int totalMenuOptions = 7; // Загальна кількість пунктів меню
+int totalMenuOptions = 8; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
 
@@ -153,6 +153,15 @@ unsigned long lastEnemyMoveTime = 0;
 unsigned long lastBulletMoveTime = 0;
 const unsigned long bulletMoveInterval = 50;
 
+
+int playerY = 32;              // Початкова позиція "пташки" по вертикалі
+int obstacleX = 128;           // Початкова позиція перешкоди по горизонталі
+int gapY = random(0, 64 - 20); // Початкова позиція зазору в перешкоді
+int gapHeight = 20;            // Висота зазору
+bool passedObstacle = false;   // Прапорець для відстеження, чи пройшла "пташка" перешкоду
+unsigned long lastDrawTime = 0; // Час останнього оновлення кадру
+const unsigned long drawInterval = 50; // Інтервал оновлення зображення
+   
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -259,7 +268,7 @@ void loop() {
     } else {
           // Вибір відповідної функції в підменю
           if (menuOption == 0) {
-              showTemperatureAndHumidity();
+               showTemperatureAndHumidity();
           } else if (menuOption == 1) {
               showWeather();
           } else if (menuOption == 2) {
@@ -269,9 +278,11 @@ void loop() {
           } else if (menuOption == 4) {
               showTimer();
           } else if (menuOption == 5) {
-              showGame();  // Існуюча гра
+              showGame();
           } else if (menuOption == 6) {
-              showSpaceInvaders();  // Додано для Space Invaders
+              showSpaceInvaders();
+          } else if (menuOption == 7) {
+              showFlappyBird();   // Додано для Space Invaders
           }
       }
 
@@ -484,12 +495,13 @@ void showMenu() {
 
         // Оновлені назви для нових пунктів меню
         String optionText = (optionIndex == 0) ? "Кімната" : 
-                            (optionIndex == 1) ? "Вулиця" :
-                            (optionIndex == 2) ? "Секундомір" : 
-                            (optionIndex == 3) ? "Тиск" : 
-                            (optionIndex == 4) ? "Таймер" :
-                            (optionIndex == 5) ? "Гра" :
-                            (optionIndex == 6) ? "Space Invaders" : "";  // Новий пункт меню
+                      (optionIndex == 1) ? "Вулиця" :
+                      (optionIndex == 2) ? "Секундомір" : 
+                      (optionIndex == 3) ? "Тиск" : 
+                      (optionIndex == 4) ? "Таймер" :
+                      (optionIndex == 5) ? "Гра" :
+                      (optionIndex == 6) ? "Space Invaders" : 
+                      (optionIndex == 7) ? "Flappy Bird" : "";  // Новий пункт меню
 
         int textWidth = u8g2.getStrWidth(optionText.c_str());
 
@@ -772,6 +784,58 @@ void showTimer() {
 
 
 
+void showFlappyBird() {
+    if (digitalRead(BUTTON_PIN) == LOW) { // Перевірка на натискання кнопки виходу
+        inSubMenu = false;  // Повертання до меню
+        return;
+    }
+
+    unsigned long currentMillis = millis();
+
+    int joystickY = analogRead(JOYSTICK_Y_PIN);
+    if (joystickY < 1000) {  // Рух вгору
+        playerY = max(0, playerY - 1);
+    } else if (joystickY > 3000) {  // Рух вниз
+        playerY = min(63, playerY + 1);
+    }
+
+    if (currentMillis - lastDrawTime >= drawInterval) {
+        lastDrawTime = currentMillis;
+
+        obstacleX -= 2;
+
+        if (obstacleX < -5) {
+            obstacleX = 128;
+            gapY = random(0, 64 - gapHeight);
+            passedObstacle = false;
+        }
+
+        u8g2.clearBuffer();
+        
+        u8g2.drawBox(5, playerY, 5, 5);
+
+        u8g2.drawBox(obstacleX, 0, 5, gapY); 
+        u8g2.drawBox(obstacleX, gapY + gapHeight, 5, 64 - (gapY + gapHeight)); 
+
+        if (obstacleX < 10 && (playerY < gapY || playerY > gapY + gapHeight)) {
+            playerY = 32;
+            obstacleX = 128;
+            score = 0;
+            passedObstacle = false;
+        } else if (obstacleX < 5 && !passedObstacle) {
+            score++;
+            passedObstacle = true;
+        }
+
+        u8g2.setFont(u8g2_font_6x10_tr);
+        u8g2.setCursor(0, 10);
+        u8g2.print("Score: ");
+        u8g2.print(score);
+
+        u8g2.sendBuffer();
+    }
+}
+
 
 
 
@@ -973,9 +1037,13 @@ void checkCollisions() {
 }
 
 void showSpaceInvaders() {
-    // Виклик функцій для оновлення гри
+    // Перевірка на програш і автоматичний перезапуск гри
+    if (gameOver) {
+        resetGame();
+    }
+
     unsigned long currentTime = millis();
-    
+
     // Оновлення стану джойстика та перевірка зіткнень
     readJoystick();
     checkCollisions();
@@ -1052,12 +1120,12 @@ void resetEnemies() {
 }
 
 void resetGame() {
-    gameOver = false;
-    bulletActive = false;
-    score = 0;
-    resetEnemies();
+    gameOver = false;       // Скидаємо статус програшу
+    bulletActive = false;   // Деактивуємо кулю
+    score = 0;              // Скидаємо рахунок
+    playerX = screenWidth / 2 - playerWidth / 2;  // Повертаємо гравця в початкову позицію
+    resetEnemies();         // Ініціалізуємо ворогів
 }
-
 
 
 
