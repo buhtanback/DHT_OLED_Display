@@ -35,7 +35,7 @@ int buttonState = 0;
 int lastButtonState = 0;
 unsigned long lastButtonDebounceTime = 0;
 unsigned long lastJoystickDebounceTime = 0;
-unsigned long buttonDebounceDelay = 100;
+unsigned long buttonDebounceDelay = 75;
 unsigned long joystickDebounceDelay = 300;
 bool inSubMenu = false;
 bool screensaverMode = false;
@@ -161,6 +161,9 @@ int gapHeight = 20;            // Висота зазору
 bool passedObstacle = false;   // Прапорець для відстеження, чи пройшла "пташка" перешкоду
 unsigned long lastDrawTime = 0; // Час останнього оновлення кадру
 const unsigned long drawInterval = 50; // Інтервал оновлення зображення
+
+ unsigned long gameOverTime = 0; // Час, коли гра закінчилась
+const unsigned long gameOverDelay = 1000; // Затримка в 1 секунду
    
 
 void setup() {
@@ -792,12 +795,19 @@ void showFlappyBird() {
 
     unsigned long currentMillis = millis();
 
+    // Зчитування значення з джойстика
     int joystickY = analogRead(JOYSTICK_Y_PIN);
-    if (joystickY < 1000) {  // Рух вгору
-        playerY = max(0, playerY - 1);
-    } else if (joystickY > 3000) {  // Рух вниз
-        playerY = min(63, playerY + 1);
-    }
+
+    // Мапінг значення з джойстика на діапазон координат екрану
+    // Припустимо, що діапазон ADC від 0 до 4095. Налаштуйте 4095 на максимальне значення вашого ADC
+    int mappedY = map(joystickY, 0, 4095, 0, 63);
+
+    // Згладжування руху (опціонально)
+    float alpha = 0.2; // Коефіцієнт згладжування (0 < alpha <= 1)
+    playerY = (int)(alpha * mappedY + (1 - alpha) * playerY);
+
+    // Обмеження позиції гравця в межах екрану
+    playerY = constrain(playerY, 0, 63);
 
     if (currentMillis - lastDrawTime >= drawInterval) {
         lastDrawTime = currentMillis;
@@ -818,6 +828,7 @@ void showFlappyBird() {
         u8g2.drawBox(obstacleX, gapY + gapHeight, 5, 64 - (gapY + gapHeight)); 
 
         if (obstacleX < 10 && (playerY < gapY || playerY > gapY + gapHeight)) {
+            // Гравець зіткнувся з перешкодою
             playerY = 32;
             obstacleX = 128;
             score = 0;
@@ -835,6 +846,7 @@ void showFlappyBird() {
         u8g2.sendBuffer();
     }
 }
+
 
 
 
@@ -970,19 +982,24 @@ void showGame() {
 
 void readJoystick() {
     int joystickX = analogRead(JOYSTICK_X_PIN);
+    Serial.println(joystickX);
+    int center = 1500;   // Оновіть це значення на основі ваших вимірювань
+    int threshold = 50; // Налаштуйте поріг чутливості
 
-    if (joystickX < 1000 && playerX > 0) {
-        playerX -= 2;
-    } else if (joystickX > 3000 && playerX < screenWidth - playerWidth) {
-        playerX += 2;
+    int deviation = joystickX - center;
+
+    if (abs(deviation) > threshold) {
+        if (deviation > 0) {
+            // Рух вліво
+            playerX -= 1;
+        } else {
+            // Рух вправо
+            playerX += 1;
+        }
     }
 
-    // Постріл
-    if (digitalRead(BUTTON_PIN) == LOW && !bulletActive) {
-        bulletActive = true;
-        bulletX = playerX + playerWidth / 2 - bulletWidth / 2;
-        bulletY = screenHeight - playerHeight - bulletHeight;
-    }
+    // Обмежуємо позицію гравця в межах екрану
+    playerX = constrain(playerX, 0, screenWidth - playerWidth);
 }
 
 void moveBullet() {
@@ -1007,7 +1024,9 @@ void moveEnemies() {
                 }
                 break;
             }
-            if (enemyY[i] > screenHeight) {
+
+            // Перевірка на досягнення ворогами нижньої частини екрану
+            if (enemyY[i] >= screenHeight - playerHeight) {
                 gameOver = true;
                 return;
             }
@@ -1036,17 +1055,40 @@ void checkCollisions() {
     }
 }
 
-void showSpaceInvaders() {
-    // Перевірка на програш і автоматичний перезапуск гри
-    if (gameOver) {
-        resetGame();
+void shootBullet() {
+    if (!bulletActive) { // Якщо куля не активна, дозволяємо новий постріл
+        bulletActive = true;
+        bulletX = playerX + playerWidth / 2 - bulletWidth / 2; // Позиція кулі по X посередині гравця
+        bulletY = screenHeight - playerHeight - bulletHeight; // Початкова позиція кулі по Y
     }
+}
 
+void showSpaceInvaders() {
     unsigned long currentTime = millis();
 
+    // Перевірка на програш і автоматичний перезапуск гри з затримкою
+    if (gameOver) {
+        if (gameOverTime == 0) {
+            gameOverTime = currentTime; // Задаємо час початку затримки
+        }
+
+        // Якщо минуло більше 1 секунди з моменту програшу, скидаємо гру
+        if (currentTime - gameOverTime >= gameOverDelay) {
+            resetGame();
+            gameOverTime = 0; // Скидаємо gameOverTime для наступного програшу
+        }
+        return; // Уникаємо подальшого виконання
+    }
+
+    // Решта коду гри
     // Оновлення стану джойстика та перевірка зіткнень
     readJoystick();
     checkCollisions();
+
+    // Перевірка на натискання кнопки стрільби
+    if (digitalRead(BUTTON_PIN) == LOW) { // Замість `SHOOT_BUTTON_PIN` використовуйте відповідний пін
+        shootBullet(); // Викликаємо функцію пострілу
+    }
     
     // Оновлення кулі, якщо вона активна
     if (bulletActive && currentTime - lastBulletMoveTime > bulletMoveInterval) {
@@ -1122,8 +1164,11 @@ void resetEnemies() {
 void resetGame() {
     gameOver = false;       // Скидаємо статус програшу
     bulletActive = false;   // Деактивуємо кулю
+    bulletX = playerX + playerWidth / 2 - bulletWidth / 2; // Скидаємо позицію кулі
+    bulletY = screenHeight - playerHeight - bulletHeight;
     score = 0;              // Скидаємо рахунок
     playerX = screenWidth / 2 - playerWidth / 2;  // Повертаємо гравця в початкову позицію
+    enemyDirection = 1;     // Скидаємо напрямок ворогів
     resetEnemies();         // Ініціалізуємо ворогів
 }
 
