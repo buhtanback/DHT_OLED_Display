@@ -165,6 +165,8 @@ const unsigned long drawInterval = 50; // Інтервал оновлення з
  unsigned long gameOverTime = 0; // Час, коли гра закінчилась
 const unsigned long gameOverDelay = 1000; // Затримка в 1 секунду
    
+int deadZone = 100; // Збільшено зону нечутливості
+
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -788,8 +790,8 @@ void showTimer() {
 
 
 void showFlappyBird() {
-    if (digitalRead(BUTTON_PIN) == LOW) { // Перевірка на натискання кнопки виходу
-        inSubMenu = false;  // Повертання до меню
+    if (digitalRead(BUTTON_PIN) == LOW) { 
+        inSubMenu = false;
         return;
     }
 
@@ -797,18 +799,26 @@ void showFlappyBird() {
 
     // Зчитування значення з джойстика
     int joystickY = analogRead(JOYSTICK_Y_PIN);
+    int centerValue = 2048; // Центральне значення для 12-бітного джойстика
+    int deadZone = 100; // Зона нечутливості
 
-    // Мапінг значення з джойстика на діапазон координат екрану
-    // Припустимо, що діапазон ADC від 0 до 4095. Налаштуйте 4095 на максимальне значення вашого ADC
-    int mappedY = map(joystickY, 0, 4095, 0, 63);
+    // Перевіряємо, чи джойстик в зоні нечутливості
+    int deltaY = 0;
+    if (joystickY < centerValue - deadZone) {
+        deltaY = -1; // Повільно рухаємось вгору
+    } else if (joystickY > centerValue + deadZone) {
+        deltaY = 1;  // Повільно рухаємось вниз
+    }
 
-    // Згладжування руху (опціонально)
-    float alpha = 0.2; // Коефіцієнт згладжування (0 < alpha <= 1)
-    playerY = (int)(alpha * mappedY + (1 - alpha) * playerY);
+    // Оновлення позиції гравця тільки кожні 50 мс для більш повільного руху
+    static unsigned long lastMoveTime = 0;
+    if (currentMillis - lastMoveTime > 50) {
+        playerY += deltaY;
+        playerY = constrain(playerY, 0, 63);
+        lastMoveTime = currentMillis;
+    }
 
-    // Обмеження позиції гравця в межах екрану
-    playerY = constrain(playerY, 0, 63);
-
+    // Оновлення екрану
     if (currentMillis - lastDrawTime >= drawInterval) {
         lastDrawTime = currentMillis;
 
@@ -823,12 +833,10 @@ void showFlappyBird() {
         u8g2.clearBuffer();
         
         u8g2.drawBox(5, playerY, 5, 5);
-
         u8g2.drawBox(obstacleX, 0, 5, gapY); 
         u8g2.drawBox(obstacleX, gapY + gapHeight, 5, 64 - (gapY + gapHeight)); 
 
         if (obstacleX < 10 && (playerY < gapY || playerY > gapY + gapHeight)) {
-            // Гравець зіткнувся з перешкодою
             playerY = 32;
             obstacleX = 128;
             score = 0;
@@ -846,7 +854,6 @@ void showFlappyBird() {
         u8g2.sendBuffer();
     }
 }
-
 
 
 
