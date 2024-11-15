@@ -1009,6 +1009,7 @@ void readJoystick() {
     playerX = constrain(playerX, 0, screenWidth - playerWidth);
 }
 
+
 void moveBullet() {
     bulletY -= 4;
     if (bulletY < 0) {
@@ -1082,27 +1083,37 @@ void showSpaceInvaders() {
         // Якщо минуло більше 1 секунди з моменту програшу, скидаємо гру
         if (currentTime - gameOverTime >= gameOverDelay) {
             resetGame();
-            gameOverTime = 0; // Скидаємо gameOverTime для наступного програшу
+            // Не потрібно встановлювати gameOver = false тут, оскільки це робиться в resetGame()
+            // Після скидання гри дозволяємо виконання коду продовжитися
+        } else {
+            // Відображаємо повідомлення "Game Over"
+            u8g2.clearBuffer();
+            u8g2.setFont(u8g2_font_ncenB08_tr);
+            u8g2.setCursor(20, 30);
+            u8g2.print("Game Over");
+            u8g2.setCursor(10, 50);
+            u8g2.print("Score: ");
+            u8g2.print(score);
+            u8g2.sendBuffer();
+            return; // Уникаємо подальшого виконання, поки не мине затримка
         }
-        return; // Уникаємо подальшого виконання
     }
 
     // Решта коду гри
-    // Оновлення стану джойстика та перевірка зіткнень
     readJoystick();
     checkCollisions();
 
     // Перевірка на натискання кнопки стрільби
-    if (digitalRead(BUTTON_PIN) == LOW) { // Замість `SHOOT_BUTTON_PIN` використовуйте відповідний пін
-        shootBullet(); // Викликаємо функцію пострілу
+    if (digitalRead(BUTTON_PIN) == LOW) {
+        shootBullet();
     }
-    
+
     // Оновлення кулі, якщо вона активна
     if (bulletActive && currentTime - lastBulletMoveTime > bulletMoveInterval) {
         lastBulletMoveTime = currentTime;
         moveBullet();
     }
-    
+
     // Оновлення ворогів із затримкою
     if (currentTime - lastEnemyMoveTime > enemyMoveDelay) {
         lastEnemyMoveTime = currentTime;
@@ -1141,15 +1152,16 @@ void showSpaceInvaders() {
     if (digitalRead(BUTTON_PIN) == LOW) {
         if (buttonPressTime == 0) {
             buttonPressTime = millis();
-        } else if (millis() - buttonPressTime > 1000) {  // Утримуйте кнопку 1 секунду для виходу
-            inSubMenu = false;  // Повертаємося до меню
+        } else if (millis() - buttonPressTime > 1000) {
+            inSubMenu = false;
             buttonPressTime = 0;
-            resetGame();  // Скидаємо стан гри
+            resetGame();
         }
     } else {
         buttonPressTime = 0;
     }
 }
+
 
 void drawEnemy(int x, int y) {
     u8g2.drawPixel(x + 2, y + 1);
@@ -1160,23 +1172,35 @@ void drawEnemy(int x, int y) {
     u8g2.drawPixel(x + 7, y + 3);
 }
 
-void resetEnemies() {
-    for (int i = 0; i < maxEnemies; i++) {
-        enemyX[i] = i * (enemyWidth + 10);
-        enemyY[i] = 0;
-        enemyActive[i] = true;
-    }
+void resetGame() {
+    gameOver = false;
+    bulletActive = false;
+    bulletX = playerX + playerWidth / 2 - bulletWidth / 2;
+    bulletY = screenHeight - playerHeight - bulletHeight;
+    score = 0;
+    playerX = screenWidth / 2 - playerWidth / 2;  // Центрування гравця
+    enemyDirection = 1;
+    lastEnemyMoveTime = millis();
+    lastBulletMoveTime = millis();
+    resetEnemies();
+    gameOverTime = 0;
 }
 
-void resetGame() {
-    gameOver = false;       // Скидаємо статус програшу
-    bulletActive = false;   // Деактивуємо кулю
-    bulletX = playerX + playerWidth / 2 - bulletWidth / 2; // Скидаємо позицію кулі
-    bulletY = screenHeight - playerHeight - bulletHeight;
-    score = 0;              // Скидаємо рахунок
-    playerX = screenWidth / 2 - playerWidth / 2;  // Повертаємо гравця в початкову позицію
-    enemyDirection = 1;     // Скидаємо напрямок ворогів
-    resetEnemies();         // Ініціалізуємо ворогів
+
+
+void resetEnemies() {
+    int enemiesPerRow = 5; // Кількість ворогів у ряду
+    int spacingX = (screenWidth - (enemiesPerRow * enemyWidth)) / (enemiesPerRow + 1); // Розрахунок проміжків між ворогами по X
+    int spacingY = 5; // Проміжок між рядами ворогів по Y
+    int rows = maxEnemies / enemiesPerRow;
+
+    for (int i = 0; i < maxEnemies; i++) {
+        int row = i / enemiesPerRow;
+        int col = i % enemiesPerRow;
+        enemyX[i] = spacingX + col * (enemyWidth + spacingX);
+        enemyY[i] = spacingY + row * (enemyHeight + spacingY);
+        enemyActive[i] = true;
+    }
 }
 
 
