@@ -30,6 +30,25 @@ Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 
+
+
+int playerHP = 5;
+int botHP = 5;
+int playerAngle = 0;
+bool playerTurn = true; // черга гравця
+float catapultBulletX, catapultBulletY;
+float catapultBulletSpeedX, catapultBulletSpeedY;
+bool catapultBulletActive = false;
+bool bulletFromPlayer = true;
+unsigned long lastShotTime = 0; // Для відстеження часу між пострілами
+const unsigned long botDelay = 1000; // 1 секунда для паузи бота
+unsigned long endGameDisplayTime = 0; // Час відображення кінця гри
+bool gameEnded = false; // Статус кінця гри
+
+const float GRAVITY = 0.1;
+bool buttonLongPress = false;
+
+
 int menuOption = 0;
 int buttonState = 0;
 int lastButtonState = 0;
@@ -96,7 +115,7 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
-int totalMenuOptions = 8; // Загальна кількість пунктів меню
+int totalMenuOptions = 9; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
 
@@ -288,6 +307,8 @@ void loop() {
               showSpaceInvaders();
           } else if (menuOption == 7) {
               showFlappyBird();   // Додано для Space Invaders
+          } else if (menuOption == 8) {
+              showCatapultGame(); // Додано для "Катапульти"
           }
       }
 
@@ -507,6 +528,7 @@ void showMenu() {
                       (optionIndex == 5) ? "Гра" :
                       (optionIndex == 6) ? "Space Invaders" : 
                       (optionIndex == 7) ? "Flappy Bird" : "";  // Новий пункт меню
+                      (optionIndex == 8) ? "Catapult" : "";  // Новий пункт меню
 
         int textWidth = u8g2.getStrWidth(optionText.c_str());
 
@@ -1299,4 +1321,129 @@ bool handleReturnButton() {
     }
     lastButtonState = reading;
     return false;
+}
+
+
+void showCatapultGame() {
+  // Основний цикл гри з катапультами
+  while (!gameEnded) {
+    u8g2.clearBuffer();
+    drawCatapultGame();
+
+    // Обробка подій натискання кнопки для стрільби або виходу
+    handleButtonPress();
+
+    if (playerTurn && !catapultBulletActive && !buttonLongPress) {
+      // Управління кутом катапульти гравця за допомогою джойстика
+      playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
+      if (digitalRead(BUTTON_PIN) == LOW && !buttonLongPress) {
+        shoot(playerAngle, true); // стріляємо
+        playerTurn = false;
+        catapultBulletActive = true;
+        bulletFromPlayer = true;
+        lastShotTime = millis(); // фіксуємо час пострілу гравця
+      }
+    } else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
+      int botAngle = random(0, 90); // випадковий кут для бота
+      shoot(botAngle, false); // стріляє бот
+      playerTurn = true;
+      catapultBulletActive = true;
+      bulletFromPlayer = false;
+    }
+
+    if (catapultBulletActive) {
+      updateCatapultBullet();
+      checkCatapultCollisions();
+    }
+
+    if (playerHP <= 0 || botHP <= 0) {
+      endCatapultGame();
+    }
+    
+    u8g2.sendBuffer();
+  }
+
+  // Після закінчення гри
+  resetCatapultGame();
+}
+
+
+
+
+void drawCatapultGame() {
+  // Відображення HP
+  u8g2.setCursor(10, 10);
+  u8g2.print("P: ");
+  u8g2.print(playerHP);  // HP гравця зліва
+
+  u8g2.setCursor(108, 10);
+  u8g2.print("B: ");
+  u8g2.print(botHP);     // HP бота справа
+
+  // Відображення катапульт
+  u8g2.drawBox(10, 50, 10, 5); // Катапульта гравця зліва
+  u8g2.drawBox(108, 50, 10, 5); // Катапульта бота справа
+
+  // Відображення активного снаряда
+  if (catapultBulletActive) {
+    u8g2.drawDisc(catapultBulletX, catapultBulletY, 2); // Снаряд
+  }
+}
+
+void shoot(int angle, bool isPlayer) {
+  // Ініціалізація снаряда з початкової позиції
+  if (isPlayer) {
+    catapultBulletX = 20;
+    catapultBulletY = 50;
+  } else {
+    catapultBulletX = 108;
+    catapultBulletY = 50;
+  }
+  
+  float speed = 3.0; // Початкова швидкість снаряда
+  catapultBulletSpeedX = speed * cos(radians(angle));
+  catapultBulletSpeedY = -speed * sin(radians(angle)); // Вгору негативне значення
+}
+
+void updateCatapultBullet() {
+  // Оновлюємо положення снаряда з урахуванням гравітації
+  catapultBulletX += catapultBulletSpeedX;
+  catapultBulletY += catapultBulletSpeedY;
+  catapultBulletSpeedY += GRAVITY; // Ефект гравітації
+
+  // Якщо снаряд виходить за межі екрану
+  if (catapultBulletX < 0 || catapultBulletX > 128 || catapultBulletY > 64) {
+    catapultBulletActive = false;
+  }
+}
+
+void checkCatapultCollisions() {
+  // Перевірка на попадання у катапульту
+  if (bulletFromPlayer && catapultBulletX >= 108 && catapultBulletX <= 118 && catapultBulletY >= 50 && catapultBulletY <= 55) {
+    botHP--;
+    catapultBulletActive = false;
+  } else if (!bulletFromPlayer && catapultBulletX >= 10 && catapultBulletX <= 20 && catapultBulletY >= 50 && catapultBulletY <= 55) {
+    playerHP--;
+    catapultBulletActive = false;
+  }
+}
+
+void endCatapultGame() {
+  u8g2.clearBuffer();
+  u8g2.setCursor(30, 30);
+  if (playerHP <= 0) {
+    u8g2.print("Bot Wins!");
+  } else {
+    u8g2.print("Player Wins!");
+  }
+  u8g2.sendBuffer();
+  endGameDisplayTime = millis(); // Записуємо час кінця гри
+  gameEnded = true;
+}
+
+void resetCatapultGame() {
+    playerHP = 5;
+    botHP = 5;
+    playerTurn = true;
+    gameEnded = false;
 }
