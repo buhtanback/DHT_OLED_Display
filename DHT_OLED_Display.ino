@@ -115,7 +115,7 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
-int totalMenuOptions = 9; // Загальна кількість пунктів меню
+int totalMenuOptions = 10; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
 
@@ -291,26 +291,28 @@ void loop() {
         showMenu();
     } else {
           // Вибір відповідної функції в підменю
-          if (menuOption == 0) {
-               showTemperatureAndHumidity();
-          } else if (menuOption == 1) {
-              showWeather();
-          } else if (menuOption == 2) {
-              showStopwatch();
-          } else if (menuOption == 3) {
-              showPressure();
-          } else if (menuOption == 4) {
-              showTimer();
-          } else if (menuOption == 5) {
-              showGame();
-          } else if (menuOption == 6) {
-              showSpaceInvaders();
-          } else if (menuOption == 7) {
-              showFlappyBird();   // Додано для Space Invaders
-          } else if (menuOption == 8) {
-              showCatapultGame(); // Додано для "Катапульти"
-          }
-      }
+              if (menuOption == 0) {
+                showTemperatureAndHumidity();
+            } else if (menuOption == 1) {
+                showWeather();
+            } else if (menuOption == 2) {
+                showStopwatch();
+            } else if (menuOption == 3) {
+                showPressure();
+            } else if (menuOption == 4) {
+                showTimer();
+            } else if (menuOption == 5) {
+                showGame();
+            } else if (menuOption == 6) {
+                showSpaceInvaders();
+            } else if (menuOption == 7) {
+                showFlappyBird();
+            } else if (menuOption == 8) {
+                showCatapultGame();
+            } else if (menuOption == 9) {
+                showImage();  // Новий пункт меню "Лого" для відображення зображення
+            }
+        }
 
     // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
@@ -501,9 +503,23 @@ void showStopwatch() {
 
 void showImage() {
     u8g2.clearBuffer();
-    u8g2.drawBitmap(0, 0, 16, 128, image);
+    u8g2.drawBitmap(0, 0, 16, 128, image); // Приклад малювання зображення (перевірте параметри drawBitmap)
     u8g2.sendBuffer();
+
+    // Логіка виходу з екрану "Лого" при тривалому натисканні кнопки
+    static unsigned long buttonPressTime = 0;
+    if (digitalRead(BUTTON_PIN) == LOW) {
+        if (buttonPressTime == 0) {
+            buttonPressTime = millis(); // Початок натискання
+        } else if (millis() - buttonPressTime > 1000) { // Тривале натискання понад 1 секунду
+            inSubMenu = false; // Повернення до меню
+            buttonPressTime = 0;
+        }
+    } else {
+        buttonPressTime = 0; // Скидання часу натискання, якщо кнопка відпущена
+    }
 }
+
 
 void showMenu() {
     u8g2.clearBuffer();
@@ -527,8 +543,9 @@ void showMenu() {
                       (optionIndex == 4) ? "Таймер" :
                       (optionIndex == 5) ? "Гра" :
                       (optionIndex == 6) ? "Space Invaders" : 
-                      (optionIndex == 7) ? "Flappy Bird" : "";  // Новий пункт меню
-                      (optionIndex == 8) ? "Catapult" : "";  // Новий пункт меню
+                      (optionIndex == 7) ? "Flappy Bird" :
+                      (optionIndex == 8) ? "Catapult" :
+                      (optionIndex == 9) ? "Лого" : "";  // Додаємо пункт меню для "Лого"
 
         int textWidth = u8g2.getStrWidth(optionText.c_str());
 
@@ -544,6 +561,8 @@ void showMenu() {
 
     u8g2.sendBuffer();
 }
+
+
 
 void connectToWiFi() {
     Serial.println("Attempting to connect to WiFi...");
