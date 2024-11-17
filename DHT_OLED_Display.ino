@@ -49,6 +49,33 @@ const float GRAVITY = 0.1;
 bool buttonLongPress = false;
 
 
+int calculateBotAngle() {
+    // Відстань між гравцем та ботом
+    int deltaX = 20 - 108; // Горизонтальна відстань до гравця (гравець зліва, бот справа)
+    int deltaY = 50 - 50;  // Вертикальна відстань (змініть, якщо гравець не на тому ж рівні)
+
+    // Збільште початкову швидкість і налаштуйте гравітацію для точнішої траєкторії
+    float speed = 4.5; // Підвищена початкова швидкість снаряда для дальших пострілів
+    const float gravity = 0.08; // Оптимізоване значення гравітації для плавного польоту
+
+    // Розрахунок кута з урахуванням гравітації та початкової швидкості
+    float angleRad = atan2(deltaY + (0.5 * gravity * (deltaX / speed) * (deltaX / speed)), deltaX);
+    int targetAngle = angleRad * (180.0 / PI); // Перетворення в градуси
+
+    // Додаємо випадковість для реалістичності
+    targetAngle += random(-3, 4); // Випадкове відхилення в межах -3 до +3 градусів
+
+    // Обмежуємо кут в межах 0-90 градусів для безпеки
+    if (targetAngle < 0) targetAngle = 0;
+    if (targetAngle > 90) targetAngle = 90;
+
+    return targetAngle;
+}
+
+
+
+
+
 int menuOption = 0;
 int buttonState = 0;
 int lastButtonState = 0;
@@ -1357,16 +1384,16 @@ void showCatapultGame() {
             if (buttonPressTime == 0) {
                 buttonPressTime = millis(); // Початок натискання
             } else if (millis() - buttonPressTime > 1000) { // Тривале натискання понад 1 секунду
-                inSubMenu = false;    // Встановлюємо inSubMenu = false для повернення в меню
+                inSubMenu = false;    // Повернення в меню
                 gameEnded = true;     // Завершуємо цикл гри
                 resetCatapultGame();  // Скидаємо параметри гри
                 return;               // Виходимо з функції showCatapultGame() назад до loop()
             }
         } else {
-            buttonPressTime = 0; // Скидаємо час натискання, якщо кнопка відпущена
+            buttonPressTime = 0; // Скидання часу натискання, якщо кнопка відпущена
         }
 
-        // Логіка стрільби гравцем, якщо кнопка натиснута коротко
+        // Логіка стрільби гравцем
         if (playerTurn && !catapultBulletActive && digitalRead(BUTTON_PIN) == LOW) {
             int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
             shoot(playerAngle, true); // Стріляємо
@@ -1374,9 +1401,13 @@ void showCatapultGame() {
             catapultBulletActive = true;
             bulletFromPlayer = true;
             lastShotTime = millis(); // фіксуємо час пострілу гравця
-        } else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
-            int botAngle = random(0, 90); // випадковий кут для бота
-            shoot(botAngle, false); // стріляє бот
+        }
+
+        // Логіка стрільби бота
+        else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
+            // Розрахунок кута для попадання в гравця з додаванням випадковості
+            int botAngle = calculateBotAngle(); // Отримуємо кут для влучення у гравця
+            shoot(botAngle, false); // Стріляє бот
             playerTurn = true;
             catapultBulletActive = true;
             bulletFromPlayer = false;
@@ -1397,8 +1428,6 @@ void showCatapultGame() {
     // Після закінчення гри
     resetCatapultGame();
 }
-
-
 
 
 
