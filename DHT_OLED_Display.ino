@@ -1325,60 +1325,83 @@ bool handleReturnButton() {
 
 
 void showCatapultGame() {
-  // Основний цикл гри з катапультами
-  while (!gameEnded) {
-    u8g2.clearBuffer();
-    drawCatapultGame();
+    gameEnded = false; // Ініціалізуємо змінну на початку гри
 
-    // Обробка подій натискання кнопки для стрільби або виходу
-    handleButtonPress();
+    // Основний цикл гри з катапультами
+    while (!gameEnded) {
+        u8g2.clearBuffer();
+        drawCatapultGame();
 
-    if (playerTurn && !catapultBulletActive && !buttonLongPress) {
-      // Управління кутом катапульти гравця за допомогою джойстика
-      playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
-      if (digitalRead(BUTTON_PIN) == LOW && !buttonLongPress) {
-        shoot(playerAngle, true); // стріляємо
-        playerTurn = false;
-        catapultBulletActive = true;
-        bulletFromPlayer = true;
-        lastShotTime = millis(); // фіксуємо час пострілу гравця
-      }
-    } else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
-      int botAngle = random(0, 90); // випадковий кут для бота
-      shoot(botAngle, false); // стріляє бот
-      playerTurn = true;
-      catapultBulletActive = true;
-      bulletFromPlayer = false;
+        // Логіка виходу з гри при тривалому натисканні кнопки
+        static unsigned long buttonPressTime = 0;
+        if (digitalRead(BUTTON_PIN) == LOW) {
+            if (buttonPressTime == 0) {
+                buttonPressTime = millis(); // Початок натискання
+            } else if (millis() - buttonPressTime > 1000) { // Тривале натискання понад 1 секунду
+                inSubMenu = false;    // Встановлюємо inSubMenu = false для повернення в меню
+                gameEnded = true;     // Завершуємо цикл гри
+                resetCatapultGame();  // Скидаємо параметри гри
+                return;               // Виходимо з функції showCatapultGame() назад до loop()
+            }
+        } else {
+            buttonPressTime = 0; // Скидаємо час натискання, якщо кнопка відпущена
+        }
+
+        // Логіка стрільби гравцем, якщо кнопка натиснута коротко
+        if (playerTurn && !catapultBulletActive && digitalRead(BUTTON_PIN) == LOW) {
+            int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
+            shoot(playerAngle, true); // Стріляємо
+            playerTurn = false;
+            catapultBulletActive = true;
+            bulletFromPlayer = true;
+            lastShotTime = millis(); // фіксуємо час пострілу гравця
+        } else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
+            int botAngle = random(0, 90); // випадковий кут для бота
+            shoot(botAngle, false); // стріляє бот
+            playerTurn = true;
+            catapultBulletActive = true;
+            bulletFromPlayer = false;
+        }
+
+        if (catapultBulletActive) {
+            updateCatapultBullet();
+            checkCatapultCollisions();
+        }
+
+        if (playerHP <= 0 || botHP <= 0) {
+            endCatapultGame();
+        }
+        
+        u8g2.sendBuffer();
     }
 
-    if (catapultBulletActive) {
-      updateCatapultBullet();
-      checkCatapultCollisions();
-    }
-
-    if (playerHP <= 0 || botHP <= 0) {
-      endCatapultGame();
-    }
-    
-    u8g2.sendBuffer();
-  }
-
-  // Після закінчення гри
-  resetCatapultGame();
+    // Після закінчення гри
+    resetCatapultGame();
 }
 
 
 
 
+
 void drawCatapultGame() {
-  // Відображення HP
+  // Відображення HP гравця зліва
   u8g2.setCursor(10, 10);
   u8g2.print("P: ");
-  u8g2.print(playerHP);  // HP гравця зліва
+  u8g2.print(playerHP);
 
-  u8g2.setCursor(108, 10);
+  // Визначення позиції для HP противника в залежності від кількості цифр
+  int botHPCursorX = 100; // Базове положення для однозначного числа
+  
+  if (botHP >= 10) {
+    botHPCursorX = 94; // Зміщення лівіше для двозначного числа
+  }
+  if (botHP >= 100) {
+    botHPCursorX = 88; // Зміщення лівіше для тризначного числа
+  }
+  
+  u8g2.setCursor(botHPCursorX, 10);
   u8g2.print("B: ");
-  u8g2.print(botHP);     // HP бота справа
+  u8g2.print(botHP);
 
   // Відображення катапульт
   u8g2.drawBox(10, 50, 10, 5); // Катапульта гравця зліва
