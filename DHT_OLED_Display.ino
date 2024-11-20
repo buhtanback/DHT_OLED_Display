@@ -146,7 +146,7 @@ unsigned long lastPressureUpdateTime = 0;  // Час останнього оно
 const unsigned long pressureUpdateInterval = 60000;  // 
 
 
-int totalMenuOptions = 10; // Загальна кількість пунктів меню
+int totalMenuOptions = 11; // Загальна кількість пунктів меню
 int maxDisplayOptions = 3;
 
 
@@ -341,7 +341,9 @@ void loop() {
             } else if (menuOption == 8) {
                 showCatapultGame();
             } else if (menuOption == 9) {
-                showImage();  // Новий пункт меню "Лого" для відображення зображення
+                showImage();
+            } else if (menuOption == 10) {
+                showScreensaver();  // Новий пункт меню "Лого" для відображення зображення
             }
         }
 
@@ -568,15 +570,16 @@ void showMenu() {
 
         // Оновлені назви для нових пунктів меню
         String optionText = (optionIndex == 0) ? "Кімната" : 
-                      (optionIndex == 1) ? "Вулиця" :
-                      (optionIndex == 2) ? "Секундомір" : 
-                      (optionIndex == 3) ? "Тиск" : 
-                      (optionIndex == 4) ? "Таймер" :
-                      (optionIndex == 5) ? "Гра" :
-                      (optionIndex == 6) ? "Space Invaders" : 
-                      (optionIndex == 7) ? "Flappy Bird" :
-                      (optionIndex == 8) ? "Catapult" :
-                      (optionIndex == 9) ? "Лого" : "";  // Додаємо пункт меню для "Лого"
+                            (optionIndex == 1) ? "Вулиця" :
+                            (optionIndex == 2) ? "Секундомір" : 
+                            (optionIndex == 3) ? "Тиск" : 
+                            (optionIndex == 4) ? "Таймер" :
+                            (optionIndex == 5) ? "Гра" :
+                            (optionIndex == 6) ? "Space Invaders" : 
+                            (optionIndex == 7) ? "Flappy Bird" :
+                            (optionIndex == 8) ? "Catapult" :
+                            (optionIndex == 9) ? "Лого" :
+                            (optionIndex == 10) ? "ScreenSaver" : "";  
 
         int textWidth = u8g2.getStrWidth(optionText.c_str());
 
@@ -1555,4 +1558,53 @@ void resetCatapultGame() {
     botHP = 5;
     playerTurn = true;
     gameEnded = false;
+}
+
+
+
+void showScreensaver() {
+    // Ініціалізація параметрів м'ячика
+    float ballX = 64; // Початкова позиція по X
+    float ballY = 32; // Початкова позиція по Y
+    float ballSpeedX = 1.5; // Швидкість по X
+    float ballSpeedY = 1.2; // Швидкість по Y
+    const int ballRadius = 3; // Радіус м'ячика
+
+    unsigned long lastUpdateTime = 0; // Час останнього оновлення анімації
+    const unsigned long updateInterval = 30; // Інтервал оновлення в мс
+
+    bool screensaverActive = true; // Заставка активна
+
+    while (screensaverActive) {
+        // Отримуємо поточний час
+        unsigned long currentTime = millis();
+
+        // Перевіряємо, чи настав час оновити анімацію
+        if (currentTime - lastUpdateTime >= updateInterval) {
+            lastUpdateTime = currentTime; // Оновлюємо час останнього оновлення
+
+            // Оновлення позиції м'ячика
+            ballX += ballSpeedX;
+            ballY += ballSpeedY;
+
+            // Перевірка відскоків від стін
+            if (ballX - ballRadius <= 0 || ballX + ballRadius >= 128) {
+                ballSpeedX *= -1; // Міняємо напрямок по X
+            }
+            if (ballY - ballRadius <= 0 || ballY + ballRadius >= 64) {
+                ballSpeedY *= -1; // Міняємо напрямок по Y
+            }
+
+            // Малюємо м'ячик
+            u8g2.clearBuffer();
+            u8g2.drawDisc(ballX, ballY, ballRadius);
+            u8g2.sendBuffer();
+        }
+
+        // Вихід із заставки при натисканні кнопки
+        if (digitalRead(BUTTON_PIN) == LOW) {
+            screensaverActive = false;
+            inSubMenu = false; // Повернення в меню
+        }
+    }
 }
