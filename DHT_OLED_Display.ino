@@ -1376,6 +1376,14 @@ void showCatapultGame() {
     // Основний цикл гри з катапультами
     while (!gameEnded) {
         u8g2.clearBuffer();
+        
+        // Малюємо траєкторію, якщо це хід гравця
+        if (playerTurn && !catapultBulletActive) {
+            int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
+            drawTrajectory(playerAngle, true); // Малюємо траєкторію для гравця
+        }
+
+        // Малюємо елементи гри
         drawCatapultGame();
 
         // Логіка виходу з гри при тривалому натисканні кнопки
@@ -1431,35 +1439,56 @@ void showCatapultGame() {
 
 
 
-void drawCatapultGame() {
-  // Відображення HP гравця зліва
-  u8g2.setCursor(10, 10);
-  u8g2.print("P: ");
-  u8g2.print(playerHP);
+void drawTrajectory(int angle, bool isPlayer) {
+    float speed = 3.0; // Початкова швидкість
+    float posX = isPlayer ? 20 : 108; // Початкова позиція
+    float posY = 50;
+    float velX = speed * cos(radians(angle));
+    float velY = -speed * sin(radians(angle));
 
-  // Визначення позиції для HP противника в залежності від кількості цифр
-  int botHPCursorX = 100; // Базове положення для однозначного числа
-  
-  if (botHP >= 10) {
-    botHPCursorX = 94; // Зміщення лівіше для двозначного числа
-  }
-  if (botHP >= 100) {
-    botHPCursorX = 88; // Зміщення лівіше для тризначного числа
-  }
-  
-  u8g2.setCursor(botHPCursorX, 10);
-  u8g2.print("B: ");
-  u8g2.print(botHP);
+    for (int i = 0; i < 30; i++) { // Прогнозуємо траєкторію на 30 кроків
+        posX += velX;
+        posY += velY;
+        velY += GRAVITY; // Ефект гравітації
 
-  // Відображення катапульт
-  u8g2.drawBox(10, 50, 10, 5); // Катапульта гравця зліва
-  u8g2.drawBox(108, 50, 10, 5); // Катапульта бота справа
+        // Вихід за межі екрану
+        if (posX < 0 || posX > 128 || posY > 64) {
+            break;
+        }
 
-  // Відображення активного снаряда
-  if (catapultBulletActive) {
-    u8g2.drawDisc(catapultBulletX, catapultBulletY, 2); // Снаряд
-  }
+        // Малюємо точку траєкторії
+        u8g2.drawPixel(posX, posY);
+    }
 }
+
+
+void drawCatapultGame() {
+    // Відображення HP
+    u8g2.setCursor(10, 10);
+    u8g2.print("P: ");
+    u8g2.print(playerHP);
+
+    int botHPCursorX = (botHP >= 100) ? 88 : (botHP >= 10 ? 94 : 100);
+    u8g2.setCursor(botHPCursorX, 10);
+    u8g2.print("B: ");
+    u8g2.print(botHP);
+
+    // Катапульти
+    u8g2.drawBox(10, 50, 10, 5); // Гравець
+    u8g2.drawBox(108, 50, 10, 5); // Бот
+
+    // Траєкторія
+    if (playerTurn && !catapultBulletActive) {
+        int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90);
+        drawTrajectory(playerAngle, true);
+    }
+
+    // Снаряд
+    if (catapultBulletActive) {
+        u8g2.drawDisc(catapultBulletX, catapultBulletY, 2);
+    }
+}
+
 
 void shoot(int angle, bool isPlayer) {
   // Ініціалізація снаряда з початкової позиції
@@ -1475,6 +1504,8 @@ void shoot(int angle, bool isPlayer) {
   catapultBulletSpeedX = speed * cos(radians(angle));
   catapultBulletSpeedY = -speed * sin(radians(angle)); // Вгору негативне значення
 }
+
+
 
 void updateCatapultBullet() {
   // Оновлюємо положення снаряда з урахуванням гравітації
@@ -1498,6 +1529,8 @@ void checkCatapultCollisions() {
     catapultBulletActive = false;
   }
 }
+
+
 
 void endCatapultGame() {
   u8g2.clearBuffer();
