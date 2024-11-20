@@ -31,7 +31,7 @@ Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 
 
-
+int botShotCounter = 0; // Лічильник пострілів бота
 int playerHP = 5;
 int botHP = 5;
 int playerAngle = 0;
@@ -41,7 +41,7 @@ float catapultBulletSpeedX, catapultBulletSpeedY;
 bool catapultBulletActive = false;
 bool bulletFromPlayer = true;
 unsigned long lastShotTime = 0; // Для відстеження часу між пострілами
-const unsigned long botDelay = 1000; // 1 секунда для паузи бота
+const unsigned long botDelay = random(1000, 3000);  // 1 секунда для паузи бота
 unsigned long endGameDisplayTime = 0; // Час відображення кінця гри
 bool gameEnded = false; // Статус кінця гри
 
@@ -50,29 +50,33 @@ bool buttonLongPress = false;
 
 
 int calculateBotAngle() {
-    // Відстань між гравцем та ботом
-    int deltaX = 20 - 108; // Горизонтальна відстань до гравця (гравець зліва, бот справа)
-    int deltaY = 50 - 50;  // Вертикальна відстань (змініть, якщо гравець не на тому ж рівні)
+    // Визначаємо відстань між ботом і гравцем
+    float dx = abs(20 - 108); // Модуль горизонтальної відстані
+    float dy = 50 - 50;       // Вертикальна різниця (обидві катапульти на одній висоті)
 
-    // Збільште початкову швидкість і налаштуйте гравітацію для точнішої траєкторії
-    float speed = 4.5; // Підвищена початкова швидкість снаряда для дальших пострілів
-    const float gravity = 0.08; // Оптимізоване значення гравітації для плавного польоту
+    // Розрахунок початкової швидкості
+    float speed = 3.0;
+    float g = GRAVITY;
 
-    // Розрахунок кута з урахуванням гравітації та початкової швидкості
-    float angleRad = atan2(deltaY + (0.5 * gravity * (deltaX / speed) * (deltaX / speed)), deltaX);
-    int targetAngle = angleRad * (180.0 / PI); // Перетворення в градуси
+    // Збільшуємо лічильник пострілів
+    botShotCounter++;
 
-    // Додаємо випадковість для реалістичності
-    targetAngle += random(-3, 4); // Випадкове відхилення в межах -3 до +3 градусів
+    // Якщо це третій постріл, бот стріляє точно
+    if (botShotCounter % 3 == 0) {
+        if (pow(speed, 4) < g * (g * pow(dx, 2) + 2 * dy * pow(speed, 2))) {
+            return 45; // Якщо траєкторія неможлива, повертаємо кут 45° як універсальний
+        }
 
-    // Обмежуємо кут в межах 0-90 градусів для безпеки
-    if (targetAngle < 0) targetAngle = 0;
-    if (targetAngle > 90) targetAngle = 90;
+        // Розрахунок точного кута для попадання
+        float angleRadians = atan((pow(speed, 2) - sqrt(pow(speed, 4) - g * (g * pow(dx, 2) + 2 * dy * pow(speed, 2)))) / (g * dx));
+        int botAngle = degrees(angleRadians);
 
-    return targetAngle;
+        return botAngle;
+    } else {
+        // Для інших пострілів випадкові кути для промаху
+        return random(30, 60); // Випадковий кут між 30° і 60°
+    }
 }
-
-
 
 
 
@@ -1413,13 +1417,13 @@ void showCatapultGame() {
 
         // Логіка стрільби бота
         else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
-            // Розрахунок кута для попадання в гравця з додаванням випадковості
-            int botAngle = calculateBotAngle(); // Отримуємо кут для влучення у гравця
+            int botAngle = calculateBotAngle(); // Розрахунок кута з випадковістю
             shoot(botAngle, false); // Стріляє бот
             playerTurn = true;
             catapultBulletActive = true;
             bulletFromPlayer = false;
         }
+
 
         if (catapultBulletActive) {
             updateCatapultBullet();
@@ -1491,19 +1495,20 @@ void drawCatapultGame() {
 
 
 void shoot(int angle, bool isPlayer) {
-  // Ініціалізація снаряда з початкової позиції
-  if (isPlayer) {
-    catapultBulletX = 20;
-    catapultBulletY = 50;
-  } else {
-    catapultBulletX = 108;
-    catapultBulletY = 50;
-  }
-  
-  float speed = 3.0; // Початкова швидкість снаряда
-  catapultBulletSpeedX = speed * cos(radians(angle));
-  catapultBulletSpeedY = -speed * sin(radians(angle)); // Вгору негативне значення
+    // Ініціалізація снаряда з початкової позиції
+    if (isPlayer) {
+        catapultBulletX = 20;
+        catapultBulletY = 50;
+        catapultBulletSpeedX = 3.0 * cos(radians(angle));  // Вправо
+    } else {
+        catapultBulletX = 108;
+        catapultBulletY = 50;
+        catapultBulletSpeedX = -3.0 * cos(radians(angle)); // Вліво
+    }
+
+    catapultBulletSpeedY = -3.0 * sin(radians(angle)); // Вгору (негативне значення)
 }
+
 
 
 
