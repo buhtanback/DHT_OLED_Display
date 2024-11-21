@@ -1563,41 +1563,71 @@ void resetCatapultGame() {
 
 
 void showScreensaver() {
-    // Ініціалізація параметрів м'ячика
-    float ballX = 64; // Початкова позиція по X
-    float ballY = 32; // Початкова позиція по Y
-    float ballSpeedX = 1.5; // Швидкість по X
-    float ballSpeedY = 1.2; // Швидкість по Y
-    const int ballRadius = 3; // Радіус м'ячика
+    // Зупиняємо Mesh-сітку та підключаємося до Wi-Fi
+    mesh.stop();
+    connectToWiFi();
 
-    unsigned long lastUpdateTime = 0; // Час останнього оновлення анімації
-    const unsigned long updateInterval = 30; // Інтервал оновлення в мс
+    // Ініціалізація NTP-клієнта
+    timeClient.begin();
+    timeClient.update();
+    unsigned long epochTime = timeClient.getEpochTime();
+    long utcOffset = getCurrentUtcOffset(epochTime);
+    timeClient.setTimeOffset(utcOffset);
 
-    bool screensaverActive = true; // Заставка активна
+    // Таймери
+    unsigned long previousTimeMillis = 0; // Таймер для оновлення часу
+    const unsigned long timeInterval = 1000; // Інтервал оновлення часу (1 секунда)
+    unsigned long previousBallMillis = 0; // Таймер для оновлення м'ячика
+    const unsigned long ballInterval = 30; // Інтервал оновлення м'ячика (30 мс)
+
+    // Параметри м'ячика
+    float ballX = 64, ballY = 32;      // Початкова позиція м'ячика
+    float ballSpeedX = 1.5, ballSpeedY = 1.2; // Швидкість м'ячика
+    const int ballRadius = 3;          // Радіус м'ячика
+
+    bool screensaverActive = true;
 
     while (screensaverActive) {
-        // Отримуємо поточний час
-        unsigned long currentTime = millis();
+        unsigned long currentMillis = millis();
 
-        // Перевіряємо, чи настав час оновити анімацію
-        if (currentTime - lastUpdateTime >= updateInterval) {
-            lastUpdateTime = currentTime; // Оновлюємо час останнього оновлення
+        // Оновлення часу через заданий інтервал
+        if (currentMillis - previousTimeMillis >= timeInterval) {
+            previousTimeMillis = currentMillis;
+            timeClient.update();
+        }
+
+        // Оновлення позиції м'ячика через заданий інтервал
+        if (currentMillis - previousBallMillis >= ballInterval) {
+            previousBallMillis = currentMillis;
 
             // Оновлення позиції м'ячика
             ballX += ballSpeedX;
             ballY += ballSpeedY;
 
-            // Перевірка відскоків від стін
+            // Відбивання м'ячика від стінок
             if (ballX - ballRadius <= 0 || ballX + ballRadius >= 128) {
-                ballSpeedX *= -1; // Міняємо напрямок по X
+                ballSpeedX *= -1;
             }
             if (ballY - ballRadius <= 0 || ballY + ballRadius >= 64) {
-                ballSpeedY *= -1; // Міняємо напрямок по Y
+                ballSpeedY *= -1;
             }
 
-            // Малюємо м'ячик
+            // Малюємо м'ячик і час на екрані
             u8g2.clearBuffer();
+
+            // Малюємо м'ячик
             u8g2.drawDisc(ballX, ballY, ballRadius);
+
+            // Малюємо час
+            String currentTime = timeClient.getFormattedTime();
+            u8g2.setFont(u8g2_font_courB18_tr);
+            int textWidth = u8g2.getStrWidth(currentTime.c_str());
+            int x = (128 - textWidth) / 2;
+            int y = 40;
+            u8g2.setCursor(x, y);
+            u8g2.print(currentTime);
+
+            // Відправка даних на екран
             u8g2.sendBuffer();
         }
 
@@ -1607,4 +1637,9 @@ void showScreensaver() {
             inSubMenu = false; // Повернення в меню
         }
     }
+
+    // Відключаємося від Wi-Fi та відновлюємо Mesh-сітку
+    WiFi.disconnect();
+    mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
+    timeClient.end();
 }
