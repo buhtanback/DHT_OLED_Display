@@ -117,6 +117,8 @@ bool isBMPAvailable = true;
 
 static unsigned long lastButtonPressTime = 0;
 
+
+
 long getCurrentUtcOffset(unsigned long epochTime) {
     struct tm * timeInfo = gmtime((time_t *)&epochTime);
 
@@ -217,6 +219,15 @@ const unsigned long gameOverDelay = 1000; // Затримка в 1 секунд�
    
 int deadZone = 100; // Збільшено зону нечутливості
 
+bool buttonPressed = false;         // Стан кнопки
+bool exitInProgress = false;        // Чи триває процес виходу
+unsigned long buttonPressStartTime = 0; // Час початку натискання кнопки
+unsigned long lastActionTime = 0;       // Час останньої дії для debounce
+const unsigned long longPressDuration = 1000; // Тривалість довгого натискання
+const unsigned long debounceDelay = 300;      // Затримка для debounce
+bool blockInputAfterLongPress = false; // Блокування повторного входу після виходу
+bool ignoreButtonUntilRelease = false; // Ігнорувати натискання кнопки до її відпускання
+
 
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -267,6 +278,7 @@ void setup() {
 
 void loop() {
     // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
+    updateButtonState();
     mesh.update();
 
     // Обробка натискань кнопок із додатковим дебаунсом
@@ -321,36 +333,58 @@ void loop() {
         // Відображаємо меню
         showMenu();
     } else {
-          // Вибір відповідної функції в підменю
-              if (menuOption == 0) {
-                showTemperatureAndHumidity();
-            } else if (menuOption == 1) {
-                showWeather();
-            } else if (menuOption == 2) {
-                showStopwatch();
-            } else if (menuOption == 3) {
-                showPressure();
-            } else if (menuOption == 4) {
-                showTimer();
-            } else if (menuOption == 5) {
-                showGame();
-            } else if (menuOption == 6) {
-                showSpaceInvaders();
-            } else if (menuOption == 7) {
-                showFlappyBird();
-            } else if (menuOption == 8) {
-                showCatapultGame();
-            } else if (menuOption == 9) {
-                showImage();
-            } else if (menuOption == 10) {
-                showScreensaver();  // Новий пункт меню "Лого" для відображення зображення
-            }
-        }
+        // Виклик функції обробки пунктів меню
+        handleMenuOption(menuOption);
+    }
 
     // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
         readAndSendData();
         lastSerialUpdateTime = millis();
+    }
+}
+
+
+
+// Функція для обробки пунктів меню
+void handleMenuOption(int menuOption) {
+    switch (menuOption) {
+        case 0:
+            showTemperatureAndHumidity();
+            break;
+        case 1:
+            showWeather();
+            break;
+        case 2:
+            showStopwatch();
+            break;
+        case 3:
+            showPressure();
+            break;
+        case 4:
+            showTimer();
+            break;
+        case 5:
+            showGame();
+            break;
+        case 6:
+            showSpaceInvaders();
+            break;
+        case 7:
+            showFlappyBird();
+            break;
+        case 8:
+            showCatapultGame();
+            break;
+        case 9:
+            showImage();
+            break;
+        case 10:
+            showScreensaver();  // Новий пункт меню "Лого"
+            break;
+        default:
+            Serial.println("Невідомий пункт меню!");
+            break;
     }
 }
 
@@ -386,16 +420,6 @@ void handleButtonPress() {
                 }
                 Serial.print("Button pressed once. Entering subMenu: ");
                 Serial.println(menuOption);
-            }
-        } else if (buttonPressCount == 2 || buttonPressCount == 3) {
-            if (!inSubMenu) {
-                screensaverMode = !screensaverMode;
-                Serial.println("Button pressed 2 or 3 times. Toggling screensaver mode.");
-                if (screensaverMode) {
-                    isWelcomeScreenVisible = true;
-                } else {
-                    isWelcomeScreenVisible = false;
-                }
             }
         }
         buttonPressCount = 0;
@@ -1318,46 +1342,124 @@ void showPressure() {
 }
 
 
-void handleTimerButtonPress() {
-    static unsigned long lastButtonPressTime = 0;
-    const unsigned long debounceDelay = 200;  // 200 мс для запобігання повторним натисканням
-    unsigned long currentMillis = millis();
 
-    if (digitalRead(BUTTON_PIN) == LOW && currentMillis - lastButtonPressTime > debounceDelay) {
-        if (selectedButton == 0 && !timerRunning) {
-            // Якщо вибрано "Старт" і таймер не працює
-            timerRunning = true;
-            countdownTimeInMillis = (setMinutes * 60000) + (setSeconds * 1000);  // Встановлюємо час
-            Serial.println("Таймер запущено");
-        } else if (selectedButton == 1) {
-            // Якщо вибрано "Скинути"
-            resetTimer();  // Скидаємо таймер
+
+void updateButtonState() {
+    int buttonState = digitalRead(BUTTON_PIN);
+    static bool buttonWasReleased = true;
+
+    if (ignoreButtonUntilRelease) {
+        if (buttonState == HIGH) {
+            // Кнопка відпущена, можна знову реагувати на натискання
+            ignoreButtonUntilRelease = false;
+            buttonWasReleased = true;
         }
-        lastButtonPressTime = currentMillis;  // Оновлюємо час останнього натискання
+        // Якщо кнопка все ще натиснута, нічого не робимо
+        return;
+    }
+
+    if (buttonState == LOW && buttonWasReleased) {
+        // Кнопка щойно натиснута
+        buttonPressed = true;
+        buttonPressStartTime = millis();
+        buttonWasReleased = false;
+    } else if (buttonState == LOW && buttonPressed) {
+        // Кнопка тримається натиснутою
+        if (!buttonLongPress && millis() - buttonPressStartTime > longPressDuration) {
+            buttonLongPress = true;
+            handleLongPress();
+            ignoreButtonUntilRelease = true; // Ігноруємо подальші натискання до відпускання кнопки
+        }
+    } else if (buttonState == HIGH && buttonPressed) {
+        // Кнопка щойно відпущена
+        if (!buttonLongPress) {
+            handleShortPress();
+        }
+        // Скидаємо стан кнопки
+        buttonPressed = false;
+        buttonLongPress = false;
+        buttonPressStartTime = 0;
+        buttonWasReleased = true;
     }
 }
 
+
+
+// Обробка короткого натискання
+void handleShortPress() {
+    if (!inSubMenu && !screensaverMode) {
+        inSubMenu = true;
+        Serial.print("Коротке натискання. Вхід у підменю: ");
+        Serial.println(menuOption);
+    } else if (inSubMenu) {
+        handleMenuOption(menuOption); // Виклик функції обробки меню
+    } else if (screensaverMode) {
+        screensaverMode = false; // Вихід із заставки
+        Serial.println("Вихід із режиму заставки");
+    }
+}
+
+void handleLongPress() {
+    if (inSubMenu) {
+        // Довге натискання для виходу з підменю
+        inSubMenu = false;
+        timerRunning = false;
+        Serial.println("Довге натискання. Вихід з підменю");
+        ignoreButtonUntilRelease = true; // Додаємо цю лінію
+    } else {
+        // Довге натискання в головному меню (можна додати дію)
+        Serial.println("Довге натискання в головному меню");
+        ignoreButtonUntilRelease = true; // Додаємо цю лінію
+    }
+}
+
+
 void handleReturnButtonPress() {
-    static unsigned long buttonPressTime = 0;
     unsigned long currentMillis = millis();
     int buttonState = digitalRead(BUTTON_PIN);
 
-    if (buttonState == LOW) {
-        if (buttonPressTime == 0) {
-            buttonPressTime = currentMillis;  // Початок натискання
-        }
+    // Якщо кнопка натиснута
+    if (buttonState == LOW && !buttonPressed && !exitInProgress && !blockInputAfterLongPress) {
+        buttonPressed = true;  // Фіксуємо натискання кнопки
+        buttonPressStartTime = currentMillis;
+    }
 
-        if (currentMillis - buttonPressTime > 1000) {  // Якщо натискання триває більше 1 секунди
-            inSubMenu = false;
-            timerRunning = false;
-            Serial.println("Вихід з меню");
-            buttonPressTime = 0;  // Скидаємо час натискання
+    // Якщо кнопка відпущена
+    if (buttonState == HIGH) {
+        blockInputAfterLongPress = false;  // Розблокування після відпускання кнопки
+        if (buttonPressed) {
+            buttonPressed = false;  // Скидаємо стан кнопки
+            if (!exitInProgress) {
+                // Виконуємо дію тільки після завершення натискання
+                if (inSubMenu) {
+                    Serial.println("Вихід з підменю");
+                    inSubMenu = false;
+                    exitInProgress = true;  // Фіксуємо процес виходу
+                    lastActionTime = currentMillis;
+                }
+            }
         }
-    } else {
-        buttonPressTime = 0;  // Скидаємо час натискання, якщо кнопка відпущена
+    }
+
+    // Перевірка debounce
+    if (exitInProgress && (currentMillis - lastActionTime > debounceDelay)) {
+        exitInProgress = false;  // Скидаємо блокування
+        blockInputAfterLongPress = true; // Блокуємо повторний вхід до відпускання кнопки
     }
 }
 
+// Обробка натискання в таймері
+void handleTimerButtonPress() {
+    if (selectedButton == 0 && !timerRunning) {
+        // Якщо вибрано "Старт" і таймер не працює
+        timerRunning = true;
+        countdownTimeInMillis = (setMinutes * 60000) + (setSeconds * 1000); // Встановлюємо час
+        Serial.println("Таймер запущено");
+    } else if (selectedButton == 1) {
+        // Якщо вибрано "Скинути"
+        resetTimer(); // Скидаємо таймер
+    }
+}
 
 bool handleReturnButton() {
     int reading = digitalRead(BUTTON_PIN);
