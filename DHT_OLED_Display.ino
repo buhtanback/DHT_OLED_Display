@@ -25,6 +25,8 @@ painlessMesh mesh;
 #define DHTPIN          4   
 #define DHTTYPE         DHT22   
 
+#define DEBOUNCE_DELAY 50 // Затримка в мілісекундах
+
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 
@@ -125,6 +127,28 @@ bool isBMPAvailable = true;
 
 static unsigned long lastButtonPressTime = 0;
 
+bool isButtonPressed() {
+    static unsigned long lastDebounceTime = 0;
+    static bool lastButtonState = HIGH; // Припустимо, кнопка нормально розімкнута
+
+    bool currentButtonState = digitalRead(BUTTON_PIN);
+
+    // Якщо стан кнопки змінився
+    if (currentButtonState != lastButtonState) {
+        lastDebounceTime = millis(); // Оновлюємо час останньої зміни
+    }
+
+    // Якщо стан кнопки стабільний понад 50 мс
+    if ((millis() - lastDebounceTime) > 50) {
+        if (currentButtonState == LOW && lastButtonState == HIGH) {
+            lastButtonState = currentButtonState;
+            return true; // Кнопка натиснута
+        }
+    }
+
+    lastButtonState = currentButtonState;
+    return false; // Кнопка не натиснута або дребезг
+}
 
 
 long getCurrentUtcOffset(unsigned long epochTime) {
@@ -237,6 +261,20 @@ bool blockInputAfterLongPress = false; // Блокування повторно�
 bool ignoreButtonUntilRelease = false; // Ігнорувати натискання кнопки до її відпускання
 
 
+bool drawingTrajectory = false;
+float posX, posY, velX, velY;
+int previousX, previousY, trajectoryStep;
+bool isPlayerTrajectory;
+
+
+bool waitingForRelease = false;
+unsigned long lastExitTime = 0; // Змінна для збереження часу останнього виходу
+// Глобальні змінні
+
+
+
+
+
 void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     Serial.begin(115200);
@@ -282,47 +320,78 @@ void setup() {
     isWelcomeScreenVisible = true;
 }
 
+void exitSubMenu() {
+    inSubMenu = false;
+    lastExitTime = millis(); // Фіксуємо час виходу
+}
+
+void waitForButtonRelease() {
+    while (digitalRead(BUTTON_PIN) == LOW) {
+        yield(); // Дозволяємо обробляти інші задачі
+    }
+}
+
+
+void checkButtonRelease() {
+    if (waitingForRelease) {
+        if (digitalRead(BUTTON_PIN) == HIGH) {
+            waitingForRelease = false; // Кнопка відпущена
+            // Дії після відпускання кнопки (можна додати, якщо потрібно)
+        }
+    }
+}
 
 
 void loop() {
-    // Оновлюємо Mesh в кожному циклі, щоб підтримувати зв'язок у сітці
-    updateButtonState();
-    mesh.update();
-
-    // Обробка натискань кнопок із додатковим дебаунсом
-    if (millis() - lastButtonPressTime > buttonDebounceDelay) {
-        handleButtonPress();
-        lastButtonPressTime = millis();  // Оновлення часу останнього натискання кнопки
-    }
-
-    // Перевірка на режим заставки
-    if (screensaverMode) {
-        showImage();
-        readAndSendData();
-        return;
-    }
-
-    // Перевірка на вітальну заставку
-    if (isWelcomeScreenVisible) {
-        if (millis() - welcomeScreenStartTime > 3000) {
-            isWelcomeScreenVisible = false;
-        } else {
-            readAndSendData();
-            return;
+    // Вихід у підменю
+    if (!inSubMenu && (millis() - lastExitTime > 500)) {
+        if (isButtonPressed()) {
+            inSubMenu = true;
+            waitForButtonRelease();
         }
     }
 
-    // Зчитування стану джойстика
+    // Перевіряємо, чи кнопка була відпущена після входу в підменю
+    if (inSubMenu) {
+        checkButtonRelease();
+    }
+
+    // Перевірка заставок: заставка або вітальний екран
+    if (screensaverMode) {
+        showImage();           // Показ заставки
+        readAndSendData();     // Оновлення даних
+        return;                // Повертаємося в `loop`, нічого більше не виконується
+    }
+
+    if (isWelcomeScreenVisible) {
+        if (millis() - welcomeScreenStartTime > 3000) {
+            isWelcomeScreenVisible = false; // Вихід із заставки
+        } else {
+            readAndSendData(); // Оновлення даних
+            return;            // Вихід у `loop`
+        }
+    }
+
+    // Оновлення Mesh для підтримки зв’язку
+    mesh.update();
+
+    // Дебаунс кнопки
+    if (millis() - lastButtonPressTime > buttonDebounceDelay) {
+        handleButtonPress();
+        lastButtonPressTime = millis(); // Оновлення часу останнього натискання
+    }
+
+    // Обробка джойстика
     u8g2.clearBuffer();
     int joystickY = analogRead(JOYSTICK_Y_PIN);
 
-    // Обробка джойстика для вибору пунктів меню з довшим дебаунсом
     if (!inSubMenu) {
+        // Обробка руху джойстика
         if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
             if (joystickY < 1000) {  // Рух вгору
                 menuOption--;
                 if (menuOption < 0) {
-                    menuOption = totalMenuOptions - 1;  // Перехід до останнього пункту
+                    menuOption = totalMenuOptions - 1; // Переход на останній пункт
                 }
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved up. New menuOption: ");
@@ -330,7 +399,7 @@ void loop() {
             } else if (joystickY > 3000) {  // Рух вниз
                 menuOption++;
                 if (menuOption >= totalMenuOptions) {
-                    menuOption = 0;  // Перехід до першого пункту
+                    menuOption = 0; // Переход на перший пункт
                 }
                 lastJoystickDebounceTime = millis();
                 Serial.print("Joystick moved down. New menuOption: ");
@@ -338,14 +407,14 @@ void loop() {
             }
         }
 
-        // Відображаємо меню
+        // Відображення меню
         showMenu();
     } else {
-        // Виклик функції обробки пунктів меню
+        // Вхід у підменю: виконуємо вибраний пункт
         handleMenuOption(menuOption);
     }
 
-    // Оновлення даних з датчиків та відправка через Mesh з певним інтервалом
+    // Оновлення даних з датчиків і Mesh із певним інтервалом
     if (millis() - lastSerialUpdateTime >= serialUpdateInterval) {
         readAndSendData();
         lastSerialUpdateTime = millis();
@@ -1487,104 +1556,95 @@ bool handleReturnButton() {
 }
 
 
-void showCatapultGame() {
-    gameEnded = false; // Ініціалізуємо змінну на початку гри
+bool checkExitButton() {
+    static unsigned long buttonPressTime = 0;
+    static bool buttonWasPressed = false;
 
-    // Основний цикл гри з катапультами
+    if (digitalRead(BUTTON_PIN) == LOW) {
+        if (!buttonWasPressed) {
+            buttonPressTime = millis(); // Початок натискання
+            buttonWasPressed = true;   // Позначаємо, що кнопка натиснута
+        }
+    } else if (buttonWasPressed) {
+        buttonWasPressed = false; // Кнопка відпущена
+        if (millis() - buttonPressTime > 50) { // Мінімальний час натискання 50 мс
+            return true; // Повертаємо сигнал про вихід
+        }
+    }
+
+    return false; // Кнопка не натиснута або дребезг
+}
+
+
+void showCatapultGame() {
+    gameEnded = false;
+
     while (!gameEnded) {
+        // Перевірка на вихід
+        if (checkExitButton()) {
+            inSubMenu = false;    // Повернення в меню
+            gameEnded = true;     // Завершуємо цикл гри
+            resetCatapultGame();  // Скидаємо параметри гри
+            return;
+        }
+
         u8g2.clearBuffer();
 
-        // Читаємо кут гравця
+        // Основна логіка гри (стрільба, траєкторії, оновлення)
         if (playerTurn && !catapultBulletActive) {
             playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90);
         }
 
-        // Логіка бота
+        // Логіка для бота
         if (!playerTurn && !catapultBulletActive) {
             if (!botAngleSet) {
-                botAngle = calculateBotAngle(); // Розрахунок кута бота
+                botAngle = calculateBotAngle();
                 botAngleSet = true;
-                lastShotTime = millis(); // Початок затримки перед пострілом бота
+                lastShotTime = millis();
             }
-            
-            // Відображаємо траєкторію бота
+
+            // Малювання траєкторії або стрільба
             if (millis() - lastShotTime < botDelay) {
-                // Поки не минула затримка, малюємо траєкторію
                 drawTrajectory(botAngle, false);
             } else {
-                // Після затримки бот стріляє
                 shoot(botAngle, false);
-                botAngleSet = false; // Скидаємо флаг для наступного ходу
+                botAngleSet = false;
                 playerTurn = true;
                 catapultBulletActive = true;
                 bulletFromPlayer = false;
             }
         }
 
-        // Малюємо елементи гри
-        drawCatapultGame();
-
-        // Логіка виходу з гри при тривалому натисканні кнопки
-        static unsigned long buttonPressTime = 0;
-        if (digitalRead(BUTTON_PIN) == LOW) {
-            if (buttonPressTime == 0) {
-                buttonPressTime = millis(); // Початок натискання
-            } else if (millis() - buttonPressTime > 1000) { // Тривале натискання понад 1 секунду
-                inSubMenu = false;    // Повернення в меню
-                gameEnded = true;     // Завершуємо цикл гри
-                resetCatapultGame();  // Скидаємо параметри гри
-                return;               // Виходимо з функції showCatapultGame() назад до loop()
-            }
-        } else {
-            buttonPressTime = 0; // Скидання часу натискання, якщо кнопка відпущена
-        }
-
-        // Логіка стрільби гравцем
-        if (playerTurn && !catapultBulletActive && digitalRead(BUTTON_PIN) == LOW) {
-            int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
-            shoot(playerAngle, true); // Стріляємо
-            playerTurn = false;
-            catapultBulletActive = true;
-            bulletFromPlayer = true;
-            lastShotTime = millis(); // фіксуємо час пострілу гравця
-        }
-
-        // Логіка стрільби бота
-        else if (!playerTurn && !catapultBulletActive && millis() - lastShotTime >= botDelay) {
-            int botAngle = calculateBotAngle(); // Розрахунок кута з випадковістю
-            shoot(botAngle, false); // Стріляє бот
-            playerTurn = true;
-            catapultBulletActive = true;
-            bulletFromPlayer = false;
-        }
-
-
+        // Оновлення гри
         if (catapultBulletActive) {
             updateCatapultBullet();
             checkCatapultCollisions();
         }
 
+        // Перевірка завершення гри
         if (playerHP <= 0 || botHP <= 0) {
             endCatapultGame();
         }
-        
+
+        drawCatapultGame();
         u8g2.sendBuffer();
     }
 
-    // Після закінчення гри
     resetCatapultGame();
 }
 
 
 
+
+
 void drawTrajectory(int angle, bool isPlayer) {
     float speed = 3.0; // Початкова швидкість
-    float posX = isPlayer ? 20 : 118; // Початкова позиція для бота змінена на 118
+    float posX = isPlayer ? 20 : 118; // Початкова позиція
     float posY = 50;
     float velX = speed * cos(radians(angle));
     float velY = -speed * sin(radians(angle));
 
-    // Якщо бот, то швидкість по X повинна бути негативною, оскільки стріляємо вліво
+    // Якщо бот, то швидкість по X повинна бути негативною
     if (!isPlayer) {
         velX = -velX;
     }
@@ -1592,11 +1652,15 @@ void drawTrajectory(int angle, bool isPlayer) {
     int previousX = posX;
     int previousY = posY;
 
-    for (int i = 0; i < 30; i++) {
+    // Ліміт кроків для малювання траєкторії
+    int maxSteps = 50;
+
+    for (int i = 0; i < maxSteps; i++) {
         posX += velX;
         posY += velY;
         velY += GRAVITY;
 
+        // Вихід за межі екрану
         if (posX < 0 || posX > 128 || posY > 64) {
             break;
         }
@@ -1604,9 +1668,32 @@ void drawTrajectory(int angle, bool isPlayer) {
         u8g2.drawLine(previousX, previousY, (int)posX, (int)posY);
         previousX = posX;
         previousY = posY;
+
+        // Дозволяємо обробляти інші задачі
+        yield();
     }
 }
 
+
+void updateTrajectory() {
+    if (!drawingTrajectory) return;
+
+    posX += velX;
+    posY += velY;
+    velY += GRAVITY;
+
+    if (posX < 0 || posX > 128 || posY > 64 || trajectoryStep >= 50) {
+        drawingTrajectory = false; // Завершуємо малювання
+        return;
+    }
+
+    u8g2.drawLine(previousX, previousY, (int)posX, (int)posY);
+    previousX = posX;
+    previousY = posY;
+
+    trajectoryStep++;
+    yield(); // Дозволяємо обробляти інші задачі
+}
 
 void drawCatapultGame() {
     // Відображення HP
@@ -1632,6 +1719,24 @@ void drawCatapultGame() {
     if (catapultBulletActive) {
         u8g2.drawDisc(catapultBulletX, catapultBulletY, 2);
     }
+}
+
+
+void startDrawingTrajectory(int angle, bool isPlayer) {
+    posX = isPlayer ? 20 : 118;
+    posY = 50;
+    velX = 3.0 * cos(radians(angle));
+    velY = -3.0 * sin(radians(angle));
+
+    if (!isPlayer) {
+        velX = -velX;
+    }
+
+    previousX = posX;
+    previousY = posY;
+    trajectoryStep = 0;
+    drawingTrajectory = true;
+    isPlayerTrajectory = isPlayer;
 }
 
 
