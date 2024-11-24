@@ -34,6 +34,8 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, OLED_RESET);
 int botShotCounter = 0; // Лічильник пострілів бота
 int playerHP = 5;
 int botHP = 5;
+int botAngle = 0;
+bool botAngleSet = false;
 int playerAngle = 0;
 bool playerTurn = true; // черга гравця
 float catapultBulletX, catapultBulletY;
@@ -50,31 +52,37 @@ bool buttonLongPress = false;
 
 
 int calculateBotAngle() {
-    // Визначаємо відстань між ботом і гравцем
+    // Відстань між ботом і гравцем
     float dx = abs(20 - 108); // Модуль горизонтальної відстані
     float dy = 50 - 50;       // Вертикальна різниця (обидві катапульти на одній висоті)
 
-    // Розрахунок початкової швидкості
+    // Початкова швидкість
     float speed = 3.0;
     float g = GRAVITY;
 
-    // Збільшуємо лічильник пострілів
+    // Лічильник пострілів
+    static int botShotCounter = 0; // Робимо змінну статичною
     botShotCounter++;
 
-    // Якщо це третій постріл, бот стріляє точно
-    if (botShotCounter % 3 == 0) {
-        if (pow(speed, 4) < g * (g * pow(dx, 2) + 2 * dy * pow(speed, 2))) {
-            return 45; // Якщо траєкторія неможлива, повертаємо кут 45° як універсальний
+    // Розрахунок параметра для перевірки досяжності
+    float delta = pow(speed, 4) - g * (g * pow(dx, 2) + 2 * dy * pow(speed, 2));
+
+    // Якщо траєкторія фізично можлива
+    if (delta >= 0) {
+        // Кожен третій постріл бот стріляє точно
+        if (botShotCounter % 3 == 0) {
+            // Розрахунок точного кута
+            float angleRadians = atan((pow(speed, 2) - sqrt(delta)) / (g * dx));
+            return degrees(angleRadians); // Конвертуємо в градуси
+        } else {
+            // Для інших пострілів бот спеціально "промахується"
+            int randomOffset = random(-10, 10); // Додаємо випадковий зсув
+            float angleRadians = atan((pow(speed, 2) - sqrt(delta)) / (g * dx));
+            return constrain(degrees(angleRadians) + randomOffset, 20, 70); // Обмеження кутів
         }
-
-        // Розрахунок точного кута для попадання
-        float angleRadians = atan((pow(speed, 2) - sqrt(pow(speed, 4) - g * (g * pow(dx, 2) + 2 * dy * pow(speed, 2)))) / (g * dx));
-        int botAngle = degrees(angleRadians);
-
-        return botAngle;
     } else {
-        // Для інших пострілів випадкові кути для промаху
-        return random(30, 60); // Випадковий кут між 30° і 60°
+        // Якщо траєкторія неможлива, повертаємо випадковий кут
+        return random(30, 60); // Універсальний промах
     }
 }
 
@@ -1485,11 +1493,32 @@ void showCatapultGame() {
     // Основний цикл гри з катапультами
     while (!gameEnded) {
         u8g2.clearBuffer();
-        
-        // Малюємо траєкторію, якщо це хід гравця
+
+        // Читаємо кут гравця
         if (playerTurn && !catapultBulletActive) {
-            int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90); // Кут від 0 до 90 градусів
-            drawTrajectory(playerAngle, true); // Малюємо траєкторію для гравця
+            playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90);
+        }
+
+        // Логіка бота
+        if (!playerTurn && !catapultBulletActive) {
+            if (!botAngleSet) {
+                botAngle = calculateBotAngle(); // Розрахунок кута бота
+                botAngleSet = true;
+                lastShotTime = millis(); // Початок затримки перед пострілом бота
+            }
+            
+            // Відображаємо траєкторію бота
+            if (millis() - lastShotTime < botDelay) {
+                // Поки не минула затримка, малюємо траєкторію
+                drawTrajectory(botAngle, false);
+            } else {
+                // Після затримки бот стріляє
+                shoot(botAngle, false);
+                botAngleSet = false; // Скидаємо флаг для наступного ходу
+                playerTurn = true;
+                catapultBulletActive = true;
+                bulletFromPlayer = false;
+            }
         }
 
         // Малюємо елементи гри
@@ -1550,23 +1579,31 @@ void showCatapultGame() {
 
 void drawTrajectory(int angle, bool isPlayer) {
     float speed = 3.0; // Початкова швидкість
-    float posX = isPlayer ? 20 : 108; // Початкова позиція
+    float posX = isPlayer ? 20 : 118; // Початкова позиція для бота змінена на 118
     float posY = 50;
     float velX = speed * cos(radians(angle));
     float velY = -speed * sin(radians(angle));
 
-    for (int i = 0; i < 30; i++) { // Прогнозуємо траєкторію на 30 кроків
+    // Якщо бот, то швидкість по X повинна бути негативною, оскільки стріляємо вліво
+    if (!isPlayer) {
+        velX = -velX;
+    }
+
+    int previousX = posX;
+    int previousY = posY;
+
+    for (int i = 0; i < 30; i++) {
         posX += velX;
         posY += velY;
-        velY += GRAVITY; // Ефект гравітації
+        velY += GRAVITY;
 
-        // Вихід за межі екрану
         if (posX < 0 || posX > 128 || posY > 64) {
             break;
         }
 
-        // Малюємо точку траєкторії
-        u8g2.drawPixel(posX, posY);
+        u8g2.drawLine(previousX, previousY, (int)posX, (int)posY);
+        previousX = posX;
+        previousY = posY;
     }
 }
 
@@ -1586,9 +1623,8 @@ void drawCatapultGame() {
     u8g2.drawBox(10, 50, 10, 5); // Гравець
     u8g2.drawBox(108, 50, 10, 5); // Бот
 
-    // Траєкторія
+    // Траєкторія гравця
     if (playerTurn && !catapultBulletActive) {
-        int playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90);
         drawTrajectory(playerAngle, true);
     }
 
