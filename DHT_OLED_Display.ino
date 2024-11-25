@@ -1804,7 +1804,6 @@ void resetCatapultGame() {
 }
 
 
-
 void showScreensaver() {
     // Зупиняємо Mesh-сітку та підключаємося до Wi-Fi
     mesh.stop();
@@ -1824,11 +1823,12 @@ void showScreensaver() {
     const unsigned long ballInterval = 30; // Інтервал оновлення м'ячика (30 мс)
 
     // Параметри м'ячика
-    float ballX = 64, ballY = 32;      // Початкова позиція м'ячика
+    float ballX = 64, ballY = 32;           // Початкова позиція м'ячика
     float ballSpeedX = 1.5, ballSpeedY = 1.2; // Швидкість м'ячика
-    const int ballRadius = 3;          // Радіус м'ячика
+    const int ballRadius = 3;              // Радіус м'ячика
 
     bool screensaverActive = true;
+    bool manualControl = false; // Режим керування джойстиком
 
     while (screensaverActive) {
         unsigned long currentMillis = millis();
@@ -1839,20 +1839,46 @@ void showScreensaver() {
             timeClient.update();
         }
 
+        // Зчитування джойстика
+        int joystickX = analogRead(JOYSTICK_X_PIN);
+        int joystickY = analogRead(JOYSTICK_Y_PIN);
+
+        // Перевірка, чи джойстик у нейтральній позиції
+        if (joystickX > 2000 && joystickX < 3000 && joystickY > 2000 && joystickY < 3000) {
+            manualControl = false; // Повертаємо керування м'ячиком у заставку
+        } else {
+            manualControl = true; // Активуємо ручне керування м'ячиком
+        }
+
         // Оновлення позиції м'ячика через заданий інтервал
         if (currentMillis - previousBallMillis >= ballInterval) {
             previousBallMillis = currentMillis;
 
-            // Оновлення позиції м'ячика
-            ballX += ballSpeedX;
-            ballY += ballSpeedY;
+            if (manualControl) {
+                // Керування м'ячиком за допомогою джойстика
+                if (joystickX < 2000 && ballX - ballRadius > 0) {
+                    ballX -= 2; // Рух ліворуч
+                } else if (joystickX > 3000 && ballX + ballRadius < 128) {
+                    ballX += 2; // Рух праворуч
+                }
 
-            // Відбивання м'ячика від стінок
-            if (ballX - ballRadius <= 0 || ballX + ballRadius >= 128) {
-                ballSpeedX *= -1;
-            }
-            if (ballY - ballRadius <= 0 || ballY + ballRadius >= 64) {
-                ballSpeedY *= -1;
+                if (joystickY < 2000 && ballY - ballRadius > 0) {
+                    ballY -= 2; // Рух вгору
+                } else if (joystickY > 3000 && ballY + ballRadius < 64) {
+                    ballY += 2; // Рух вниз
+                }
+            } else {
+                // Автоматичний рух м'ячика
+                ballX += ballSpeedX;
+                ballY += ballSpeedY;
+
+                // Відбивання м'ячика від стінок
+                if (ballX - ballRadius <= 0 || ballX + ballRadius >= 128) {
+                    ballSpeedX *= -1;
+                }
+                if (ballY - ballRadius <= 0 || ballY + ballRadius >= 64) {
+                    ballSpeedY *= -1;
+                }
             }
 
             // Малюємо м'ячик і час на екрані
