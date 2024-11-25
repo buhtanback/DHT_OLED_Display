@@ -151,6 +151,30 @@ bool isButtonPressed() {
 }
 
 
+bool isShootButtonPressed() {
+    static unsigned long lastDebounceTime = 0;
+    static bool lastButtonState = HIGH; // Припускаємо, що кнопка нормально розімкнута
+
+    bool currentButtonState = digitalRead(BUTTON_PIN);
+
+    if (currentButtonState != lastButtonState) {
+        lastDebounceTime = millis();
+    }
+
+    if ((millis() - lastDebounceTime) > 50) { // Дебаунсинг (50 мс)
+        if (currentButtonState == LOW && lastButtonState == HIGH) {
+            lastButtonState = currentButtonState;
+            return true; // Кнопка натиснута
+        }
+    }
+
+    lastButtonState = currentButtonState;
+    return false; // Кнопка не натиснута
+}
+
+
+
+
 long getCurrentUtcOffset(unsigned long epochTime) {
     struct tm * timeInfo = gmtime((time_t *)&epochTime);
 
@@ -270,7 +294,7 @@ bool isPlayerTrajectory;
 bool waitingForRelease = false;
 unsigned long lastExitTime = 0; // Змінна для збереження часу останнього виходу
 // Глобальні змінні
-
+bool exitButtonPressed = false; // Стан кнопки виходу
 
 
 
@@ -1557,22 +1581,19 @@ bool handleReturnButton() {
 
 
 bool checkExitButton() {
-    static unsigned long buttonPressTime = 0;
-    static bool buttonWasPressed = false;
+    static unsigned long buttonPressStart = 0;
 
-    if (digitalRead(BUTTON_PIN) == LOW) {
-        if (!buttonWasPressed) {
-            buttonPressTime = millis(); // Початок натискання
-            buttonWasPressed = true;   // Позначаємо, що кнопка натиснута
-        }
-    } else if (buttonWasPressed) {
-        buttonWasPressed = false; // Кнопка відпущена
-        if (millis() - buttonPressTime > 50) { // Мінімальний час натискання 50 мс
+    if (digitalRead(BUTTON_PIN) == LOW) { // Кнопка натиснута
+        if (buttonPressStart == 0) {
+            buttonPressStart = millis(); // Початок тривалого натискання
+        } else if (millis() - buttonPressStart > 1000) { // Тривале натискання > 1 секунди
             return true; // Повертаємо сигнал про вихід
         }
+    } else {
+        buttonPressStart = 0; // Скидаємо таймер, якщо кнопка відпущена
     }
 
-    return false; // Кнопка не натиснута або дребезг
+    return false; // Кнопка не натиснута або натискання коротке
 }
 
 
@@ -1585,6 +1606,11 @@ void showCatapultGame() {
             inSubMenu = false;    // Повернення в меню
             gameEnded = true;     // Завершуємо цикл гри
             resetCatapultGame();  // Скидаємо параметри гри
+
+            // Очікуємо відпускання кнопки перед поверненням у меню
+            while (digitalRead(BUTTON_PIN) == LOW) {
+                delay(10); // Невелика затримка для стабільності
+            }
             return;
         }
 
@@ -1593,6 +1619,15 @@ void showCatapultGame() {
         // Основна логіка гри (стрільба, траєкторії, оновлення)
         if (playerTurn && !catapultBulletActive) {
             playerAngle = map(analogRead(JOYSTICK_X_PIN), 0, 4095, 0, 90);
+
+            // Перевірка натискання кнопки для пострілу
+            if (digitalRead(BUTTON_PIN) == LOW) {
+                shoot(playerAngle, true); // Гравець стріляє
+                playerTurn = false;
+                catapultBulletActive = true;
+                bulletFromPlayer = true;
+                lastShotTime = millis(); // Фіксуємо час пострілу
+            }
         }
 
         // Логіка для бота
@@ -1632,6 +1667,8 @@ void showCatapultGame() {
 
     resetCatapultGame();
 }
+
+
 
 
 
