@@ -53,6 +53,22 @@ const float GRAVITY = 0.1;
 bool buttonLongPress = false;
 
 
+
+const unsigned char pigBitmap[] U8X8_PROGMEM = {
+    0b00000000, 0b00000000, //                 
+    0b00011111, 0b10000000, //    *****        
+    0b00100000, 0b01000000, //   *     *       
+    0b01001110, 0b01100000, //  *  ***  **     
+    0b01010001, 0b00100000, //  * *   *  *     
+    0b01011111, 0b11100000, //  * *******      
+    0b01010111, 0b11100000, //  * * ******     
+    0b00100000, 0b01000000, //   *     *       
+    0b00011111, 0b10000000, //    *****        
+    0b00010001, 0b00000000, //    *   *        
+    0b00100010, 0b00000000, //   *   *         
+    0b00000000, 0b00000000  //                 
+};
+
 int calculateBotAngle() {
     // Відстань між ботом і гравцем
     float dx = abs(20 - 108); // Модуль горизонтальної відстані
@@ -988,7 +1004,6 @@ void showTimer() {
 }
 
 
-
 void showFlappyBird() {
     if (digitalRead(BUTTON_PIN) == LOW) { 
         inSubMenu = false;
@@ -1014,7 +1029,7 @@ void showFlappyBird() {
     static unsigned long lastMoveTime = 0;
     if (currentMillis - lastMoveTime > 50) {
         playerY += deltaY;
-        playerY = constrain(playerY, 0, 63);
+        playerY = constrain(playerY, 0, 63 - 12); // Враховуємо висоту свинки (12 пікселів)
         lastMoveTime = currentMillis;
     }
 
@@ -1032,10 +1047,14 @@ void showFlappyBird() {
 
         u8g2.clearBuffer();
         
-        u8g2.drawBox(5, playerY, 5, 5);
+        // Замість квадрата малюємо свинку
+        u8g2.drawXBMP(5, playerY, 16, 12, pigBitmap); // Малюємо свинку 16x12 пікселів
+
+        // Малюємо перешкоди
         u8g2.drawBox(obstacleX, 0, 5, gapY); 
         u8g2.drawBox(obstacleX, gapY + gapHeight, 5, 64 - (gapY + gapHeight)); 
 
+        // Перевірка на зіткнення
         if (obstacleX < 10 && (playerY < gapY || playerY > gapY + gapHeight)) {
             playerY = 32;
             obstacleX = 128;
@@ -1046,6 +1065,7 @@ void showFlappyBird() {
             passedObstacle = true;
         }
 
+        // Відображення рахунку
         u8g2.setFont(u8g2_font_6x10_tr);
         u8g2.setCursor(0, 10);
         u8g2.print("Score: ");
@@ -1054,8 +1074,6 @@ void showFlappyBird() {
         u8g2.sendBuffer();
     }
 }
-
-
 
 
 
