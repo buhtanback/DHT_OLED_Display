@@ -142,6 +142,55 @@ long utcOffsetInSecondsSummer = 10800; // Літній час (GMT+3 для ва
 bool isBMPAvailable = true;
 
 static unsigned long lastButtonPressTime = 0;
+const int joystickDeadZone = 300; // Налаштуй це значення за потреби
+const int smoothingFactor = 10;
+int joystickYReadings[smoothingFactor];
+int currentReadingIndex = 0;
+int joystickCenterY = 0;
+int joystickCenterX = 0;
+unsigned long lastMenuChangeTime = 0; // Час останньої зміни пункту меню
+const unsigned long menuChangeDelay = 300; // 300 мс затримка між переходами
+const int deltaBufferSize = 5;
+
+int deltaBuffer[deltaBufferSize]; // Масив для збереження змін `deltaY`
+int deltaBufferIndex = 0; // Індекс для запису значень у буфер
+unsigned long joystickTiltStartTime = 0;
+const unsigned long joystickTiltDuration = 200;
+
+
+
+int getStableDelta() {
+    long total = 0;
+    for (int i = 0; i < deltaBufferSize; i++) {
+        total += deltaBuffer[i];
+    }
+    return total / deltaBufferSize;
+}
+
+int getSmoothedJoystickY() {
+    long total = 0;
+    for (int i = 0; i < smoothingFactor; i++) {
+        total += joystickYReadings[i];
+    }
+    return total / smoothingFactor;
+}
+
+int getMedianJoystickY() {
+    int sortedReadings[smoothingFactor];
+    memcpy(sortedReadings, joystickYReadings, sizeof(joystickYReadings));
+    // Сортування масиву
+    for (int i = 0; i < smoothingFactor - 1; i++) {
+        for (int j = i + 1; j < smoothingFactor; j++) {
+            if (sortedReadings[i] > sortedReadings[j]) {
+                int temp = sortedReadings[i];
+                sortedReadings[i] = sortedReadings[j];
+                sortedReadings[j] = temp;
+            }
+        }
+    }
+    // Повертаємо середнє значення
+    return sortedReadings[smoothingFactor / 2];
+}
 
 bool isButtonPressed() {
     static unsigned long lastDebounceTime = 0;
@@ -313,6 +362,17 @@ unsigned long lastExitTime = 0; // Змінна для збереження ча
 bool exitButtonPressed = false; // Стан кнопки виходу
 
 
+void calibrateJoystick() {
+    long total = 0;
+    const int numReadings = 100;
+    for (int i = 0; i < numReadings; i++) {
+        total += analogRead(JOYSTICK_Y_PIN);
+        delay(5); // Невелика затримка між зчитуваннями
+    }
+    joystickCenterY = total / numReadings;
+    Serial.print("Joystick Center Y Calibrated: ");
+    Serial.println(joystickCenterY);
+}
 
 
 void setup() {
@@ -322,18 +382,24 @@ void setup() {
     u8g2.begin();
     u8g2.clearBuffer();
     u8g2.sendBuffer();
-
+    calibrateJoystick();
     dht.begin();
     if (!bmp.begin()) {
         Serial.print("Не вдалося знайти датчик BMP085.");
         isBMPAvailable = false; // Встановлюємо змінну в false, якщо датчик не знайдено
     }
 
-    // Інші ініціалізації залишаємо без змін
+    // Ініціалізація джойстика
     pinMode(JOYSTICK_X_PIN, INPUT);
     pinMode(JOYSTICK_Y_PIN, INPUT);
+
+    // Калібруємо осі джойстика
+    joystickCenterY = analogRead(JOYSTICK_Y_PIN);
+    Serial.print("Joystick Center Y Calibrated: ");
+    Serial.println(joystickCenterY);
+
+    // Інші ініціалізації залишаємо без змін
     pinMode(BUTTON_PIN, INPUT_PULLUP);
-    
     joystickCenter = analogRead(JOYSTICK_X_PIN);
 
     if (isBMPAvailable) {
@@ -381,8 +447,25 @@ void checkButtonRelease() {
     }
 }
 
-
 void loop() {
+    // Зчитування джойстика
+    joystickYReadings[currentReadingIndex] = analogRead(JOYSTICK_Y_PIN);
+    currentReadingIndex = (currentReadingIndex + 1) % smoothingFactor;
+
+    int medianJoystickY = getMedianJoystickY();
+    int deltaY = medianJoystickY - joystickCenterY;
+
+    // Стабілізація значень
+    deltaBuffer[deltaBufferIndex] = deltaY;
+    deltaBufferIndex = (deltaBufferIndex + 1) % deltaBufferSize;
+    int stableDeltaY = getStableDelta();
+
+    // Вивід для діагностики
+    Serial.print("Median Joystick Y: ");
+    Serial.print(medianJoystickY);
+    Serial.print(" | Stable Delta Y: ");
+    Serial.println(stableDeltaY);
+
     // Вихід у підменю
     if (!inSubMenu && (millis() - lastExitTime > 500)) {
         if (isButtonPressed()) {
@@ -396,19 +479,19 @@ void loop() {
         checkButtonRelease();
     }
 
-    // Перевірка заставок: заставка або вітальний екран
+    // Перевірка заставок
     if (screensaverMode) {
-        showImage();           // Показ заставки
-        readAndSendData();     // Оновлення даних
-        return;                // Повертаємося в `loop`, нічого більше не виконується
+        showImage();
+        readAndSendData();
+        return;
     }
 
     if (isWelcomeScreenVisible) {
         if (millis() - welcomeScreenStartTime > 3000) {
-            isWelcomeScreenVisible = false; // Вихід із заставки
+            isWelcomeScreenVisible = false;
         } else {
-            readAndSendData(); // Оновлення даних
-            return;            // Вихід у `loop`
+            readAndSendData();
+            return;
         }
     }
 
@@ -418,32 +501,39 @@ void loop() {
     // Дебаунс кнопки
     if (millis() - lastButtonPressTime > buttonDebounceDelay) {
         handleButtonPress();
-        lastButtonPressTime = millis(); // Оновлення часу останнього натискання
+        lastButtonPressTime = millis();
     }
 
-    // Обробка джойстика
-    u8g2.clearBuffer();
-    int joystickY = analogRead(JOYSTICK_Y_PIN);
-
     if (!inSubMenu) {
-        // Обробка руху джойстика
-        if (millis() - lastJoystickDebounceTime > joystickDebounceDelay) {
-            if (joystickY < 1000) {  // Рух вгору
-                menuOption--;
-                if (menuOption < 0) {
-                    menuOption = totalMenuOptions - 1; // Переход на останній пункт
+        if (millis() - lastMenuChangeTime > menuChangeDelay) {
+            if (stableDeltaY < -joystickDeadZone) {  // Рух вгору
+                if (joystickTiltStartTime == 0) {
+                    joystickTiltStartTime = millis();
+                } else if (millis() - joystickTiltStartTime > joystickTiltDuration) {
+                    menuOption--;
+                    if (menuOption < 0) {
+                        menuOption = totalMenuOptions - 1;
+                    }
+                    lastMenuChangeTime = millis();
+                    Serial.print("Menu Option Up: ");
+                    Serial.println(menuOption);
+                    joystickTiltStartTime = 0;
                 }
-                lastJoystickDebounceTime = millis();
-                Serial.print("Joystick moved up. New menuOption: ");
-                Serial.println(menuOption);
-            } else if (joystickY > 3000) {  // Рух вниз
-                menuOption++;
-                if (menuOption >= totalMenuOptions) {
-                    menuOption = 0; // Переход на перший пункт
+            } else if (stableDeltaY > joystickDeadZone) {  // Рух вниз
+                if (joystickTiltStartTime == 0) {
+                    joystickTiltStartTime = millis();
+                } else if (millis() - joystickTiltStartTime > joystickTiltDuration) {
+                    menuOption++;
+                    if (menuOption >= totalMenuOptions) {
+                        menuOption = 0;
+                    }
+                    lastMenuChangeTime = millis();
+                    Serial.print("Menu Option Down: ");
+                    Serial.println(menuOption);
+                    joystickTiltStartTime = 0;
                 }
-                lastJoystickDebounceTime = millis();
-                Serial.print("Joystick moved down. New menuOption: ");
-                Serial.println(menuOption);
+            } else {
+                joystickTiltStartTime = 0;
             }
         }
 
@@ -460,6 +550,7 @@ void loop() {
         lastSerialUpdateTime = millis();
     }
 }
+
 
 
 
