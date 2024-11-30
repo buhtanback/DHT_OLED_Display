@@ -2002,9 +2002,9 @@ void showScreensaver() {
 
             if (manualControl) {
                 // Керування м'ячиком за допомогою джойстика
-                if (joystickX < 2000 && ballX - ballRadius > 0) {
+                if (joystickX > 3000 && ballX - ballRadius > 0) {
                     ballX -= 2; // Рух ліворуч
-                } else if (joystickX > 3000 && ballX + ballRadius < 128) {
+                } else if (joystickX < 2000 && ballX + ballRadius < 128) {
                     ballX += 2; // Рух праворуч
                 }
 
