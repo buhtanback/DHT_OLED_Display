@@ -54,20 +54,8 @@ bool buttonLongPress = false;
 
 
 
-const unsigned char pigBitmap[] U8X8_PROGMEM = {
-    0b00000000, 0b00000000, //                 
-    0b00011111, 0b10000000, //    *****        
-    0b00100000, 0b01000000, //   *     *       
-    0b01001110, 0b01100000, //  *  ***  **     
-    0b01010001, 0b00100000, //  * *   *  *     
-    0b01011111, 0b11100000, //  * *******      
-    0b01010111, 0b11100000, //  * * ******     
-    0b00100000, 0b01000000, //   *     *       
-    0b00011111, 0b10000000, //    *****        
-    0b00010001, 0b00000000, //    *   *        
-    0b00100010, 0b00000000, //   *   *         
-    0b00000000, 0b00000000  //                 
-};
+static unsigned char pig_bits[] = {
+  0x21, 0x72, 0xb4, 0xfe, 0x7f, 0x3f, 0x22, 0x22 };
 
 int calculateBotAngle() {
     // Відстань між ботом і гравцем
@@ -1139,7 +1127,7 @@ void showFlappyBird() {
         u8g2.clearBuffer();
         
         // Замість квадрата малюємо свинку
-        u8g2.drawXBMP(5, playerY, 16, 12, pigBitmap); // Малюємо свинку 16x12 пікселів
+        u8g2.drawXBMP(5, playerY, 8, 8, pig_bits); // 8x8 пікселів
 
         // Малюємо перешкоди
         u8g2.drawBox(obstacleX, 0, 5, gapY); 
